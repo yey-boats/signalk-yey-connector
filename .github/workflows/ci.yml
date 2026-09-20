@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20.10 is the floor package.json declares; 22 is what a current SignalK
+        # install is likely to be on. Both, because bare `node --test` file
+        # discovery has changed across Node majors and this repo relies on it.
+        node: ['20.10', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install
+        run: npm ci || npm install
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Unit tests
+        run: npm test
+
+  # The connector's plan etag must byte-for-byte match boat_plan.plan_etag in the
+  # cloud bundle. Nothing in either repo can catch a divergence alone: both sides
+  # pass their own tests while disagreeing about which plan a boat is running.
+  #
+  # Already caught once this way — Python's json.dumps defaults to
+  # ensure_ascii=True and JSON.stringify does not, so any boat with a non-ASCII
+  # name (Sørøya) hashed differently on the two sides, permanently.
+  #
+  # This job checks out the cloud repo and runs the YEY_BUNDLE_PATH-gated tests,
+  # which otherwise skip.
+  cross-repo-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: connector
+
+      - uses: actions/checkout@v4
+        with:
+          repository: yey-boats/navigator
+          path: navigator
+          # The bundle is not public; without a token this job is skipped rather
+          # than silently green. A skipped contract check is a known gap, a
+          # falsely-green one is a lie.
+          token: ${{ secrets.NAVIGATOR_READ_TOKEN }}
+        continue-on-error: true
+        id: checkout_bundle
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install
+        working-directory: connector
+        run: npm ci || npm install
+
+      - name: Contract tests against the real bundle
+        if: steps.checkout_bundle.outcome == 'success'
+        working-directory: connector
+        env:
+          YEY_BUNDLE_PATH: ${{ github.workspace }}/navigator
+        run: npm test
+
+      - name: Report a skipped contract check
+        if: steps.checkout_bundle.outcome != 'success'
+        run: |
+          echo "::warning::Cross-repo contract check SKIPPED — could not check out"
+          echo "::warning::yey-boats/navigator. The etag agreement between this"
+          echo "::warning::connector and boat_plan.py is therefore UNVERIFIED on"
+          echo "::warning::this run. Set NAVIGATOR_READ_TOKEN to enable it."

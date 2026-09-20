@@ -1,0 +1,36 @@
+{
+  "name": "signalk-yey-connector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Connect this SignalK server to yey.boats — a plan-driven, outbound-only cloud uplink.",
+  "main": "index.js",
+  "keywords": [
+    "signalk-node-server-plugin",
+    "signalk-webapp"
+  ],
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yey-boats/signalk-yey-connector.git"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "public",
+    "package.json"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check index.js && npm test"
+  },
+  "signalk": {
+    "displayName": "yey — cloud connector"
+  },
+  "engines": {
+    "node": ">=20.10"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.3",
+    "ws": "^8.18.0"
+  }
+}

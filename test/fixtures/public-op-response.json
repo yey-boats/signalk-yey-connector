@@ -1,0 +1,14 @@
+{
+  "status": "ok",
+  "tenant": "home",
+  "project": "demo",
+  "bundle_id": "signalk@2026-06-05",
+  "conversation_id": null,
+  "signalk_boat_claim_request": {
+    "ok": true,
+    "claim_id": "Zm9vYmFyYmF6",
+    "claim_secret": "s3cr3t-not-a-real-one",
+    "confirm_url": "https://yey.boats/account/boats/new?claim=Zm9vYmFyYmF6",
+    "expires_in": 1800
+  }
+}
