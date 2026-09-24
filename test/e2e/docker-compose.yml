@@ -1,0 +1,50 @@
+# Standalone SignalK + simulator for the connector's own end-to-end suite.
+# Deliberately NOT signalk/docker-compose.signalk.yml from navigator-tg-bot: that
+# file joins the external kdcube-internal network, which does not exist on a
+# machine that is not running the KDCube stack.
+name: yey-connector-e2e
+
+services:
+  signalk-server:
+    image: signalk/signalk-server:latest
+    environment:
+      - HOME=/home/node
+      - SIGNALK_NODE_CONFIG_DIR=/home/node/.signalk
+      # THE SIMULATOR CANNOT START WITHOUT THIS. Its connect() does
+      #   POST /signalk/v1/auth/login  +  r.raise_for_status()
+      # before it opens its delta socket, and there is no option to skip it. A
+      # bare signalk-server has no user database; the image honours
+      # ADMINUSER=user:password to provision an admin on first boot.
+      - ADMINUSER=admin:admin
+    volumes:
+      # Carries settings.json only (security.strategy = ./tokensecurity, the same
+      # strategy the board runs). ADMINUSER writes security.json in here on first
+      # boot; that file is gitignored — it holds a password hash.
+      - ./signalk-config:/home/node/.signalk
+    ports:
+      - "3100:3000"
+    healthcheck:
+      # /signalk is the discovery document and stays unauthenticated with
+      # tokensecurity on, so it is still a valid readiness probe.
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/signalk',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 15s
+
+  boat-sim:
+    image: ghcr.io/yey-boats/simulator:latest
+    environment:
+      - SIGNALK_HOST=signalk-server
+      - SIGNALK_PORT=3000
+      - SIGNALK_USERNAME=admin
+      - SIGNALK_PASSWORD=admin
+      - SINK=signalk
+      - DATA_DIR=/data
+      - PYTHONUNBUFFERED=1
+      # No bathy/geo here: without GEOGRID_API_URL the simulator degrades to a
+      # default depth and keeps producing telemetry, which is all this suite
+      # needs. Autorouting is not under test.
+    depends_on:
+      signalk-server:
+        condition: service_healthy

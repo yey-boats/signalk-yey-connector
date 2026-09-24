@@ -65,6 +65,39 @@ test('collectMeta sweeps every leaf and keeps only the paths that have meta', as
   assert.equal(meta['navigation.position'].units, 'deg')
 })
 
+test('collectMeta reads a tree whose inline meta carries source without one request', async () => {
+  // signalk-server 2.33: the value tree's inline meta is the full meta.
+  const tree = {
+    navigation: { position: { value: { latitude: 45, longitude: 13 },
+      meta: { units: 'deg', source: { manufacturer: 'Rusty Boats', model: 'RB-1' } } } },
+    environment: { depth: { belowTransducer: { value: 8.4, meta: { units: 'm' } } } },
+    design: { draft: { value: 1.9 } }
+  }
+  const fetchImpl = fakeFetch({})
+  const src = createHttpSource({ baseUrl: BASE, fetchImpl })
+  const meta = await src.collectMeta(tree)
+  assert.deepEqual(fetchImpl.seen, [])
+  assert.deepEqual(meta, {
+    'navigation.position': { units: 'deg', gear: { manufacturer: 'Rusty Boats', model: 'RB-1' } },
+    'environment.depth.belowTransducer': { units: 'm' }
+  })
+})
+
+test('collectMeta still sweeps /meta when the inline meta has no source anywhere', async () => {
+  // An older server's reduced inline meta: units yes, source never.
+  const tree = { navigation: { position: { value: { latitude: 45, longitude: 13 },
+    meta: { units: 'deg' } } } }
+  const fetchImpl = fakeFetch({
+    [`${API}/navigation/position/meta`]: {
+      units: 'deg', source: { manufacturer: 'Rusty Boats', model: 'RB-1' }
+    }
+  })
+  const src = createHttpSource({ baseUrl: BASE, fetchImpl })
+  const meta = await src.collectMeta(tree)
+  assert.equal(fetchImpl.seen.length, 1)
+  assert.equal(meta['navigation.position'].gear.model, 'RB-1')
+})
+
 test('the token travels on the delta socket URL and in the header', () => {
   const src = createHttpSource({ baseUrl: BASE, token: 'tok en' })
   assert.match(src.streamUrl(), /^ws:\/\/boat:3000\/signalk\/v1\/stream\?subscribe=self&token=tok%20en$/)

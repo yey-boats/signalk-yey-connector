@@ -4,6 +4,7 @@ package-lock.json.bak
 .DS_Store
 .env
 
-# Written by the SignalK image on first boot of the end-to-end harness
-# (Task 16) and carries a password hash — never commit it.
-test/e2e/signalk-config/security.json
+# Everything signalk-server writes into its mounted config dir on first boot
+# (security.json carries a password hash). Only settings.json is ours.
+test/e2e/signalk-config/*
+!test/e2e/signalk-config/settings.json

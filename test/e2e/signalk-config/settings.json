@@ -1,0 +1,7 @@
+{
+  "pipedProviders": [],
+  "interfaces": {},
+  "security": {
+    "strategy": "./tokensecurity"
+  }
+}

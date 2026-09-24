@@ -20,7 +20,9 @@
     "package.json"
   ],
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
+    "test:e2e": "node --test --test-timeout=60000 test/e2e/*.test.js",
+    "test:contract": "node --test test/contract.test.js",
     "check": "node --check index.js && npm test"
   },
   "signalk": {
