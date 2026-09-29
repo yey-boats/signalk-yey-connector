@@ -449,3 +449,210 @@ test('the simulator-derived fixture drives a fleet on real SignalK paths', async
   assert.ok(snap.sink.perSubject['yey.boat.data'] >= 5 * 10,
     JSON.stringify(snap.sink.perSubject))
 })
+
+// ── The sweeps ──────────────────────────────────────────────────────────────
+
+const { steadyState, reconnectHerd, backfillStorm } = require('../loadrig/sweeps')
+
+const SWEEP = { trace: TRACE, plan: PLAN, seed: 3, serviceMs: 20, maxlen: 1000 }
+
+test('the steady sweep reports one row per N, in order', async () => {
+  const r = await steadyState({ ...SWEEP, ns: [1, 5, 10], minutes: 5 })
+  assert.equal(r.sweep, 'steady')
+  assert.deepEqual(r.rows.map((row) => row.n), [1, 5, 10])
+  for (const row of r.rows) {
+    for (const key of ['offeredPerS', 'handledPerS', 'queueDepth',
+                       'evictedUndelivered', 'bytesPerEntry', 'p99InteractiveMs']) {
+      assert.ok(key in row, `${key} missing at n=${row.n}`)
+    }
+  }
+})
+
+test('offered load rises with N, which is the sanity check on the whole rig', async () => {
+  const r = await steadyState({ ...SWEEP, ns: [1, 10], minutes: 5 })
+  assert.ok(r.rows[1].offeredPerS > r.rows[0].offeredPerS)
+})
+
+test('a serial consumer that cannot keep up shows as a growing queue', async () => {
+  const r = await steadyState({ ...SWEEP, serviceMs: 500, ns: [50], minutes: 5 })
+  assert.ok(r.rows[0].queueDepth > 0, 'a 500ms handler at 50 boats should back up')
+  assert.ok(r.rows[0].handledPerS < r.rows[0].offeredPerS)
+})
+
+test('the knee is the largest N that stayed inside the budget', async () => {
+  const r = await steadyState({ ...SWEEP, ns: [1, 5, 10, 500], minutes: 5,
+                                interactiveBudgetMs: 2000 })
+  assert.ok(typeof r.summary.kneeN === 'number')
+  assert.ok(r.summary.kneeN < 500)
+  assert.ok(r.summary.limiter, 'the knee must name what stopped it')
+})
+
+test('the knee is null rather than a guess when every N passed', async () => {
+  const r = await steadyState({ ...SWEEP, ns: [1, 2], minutes: 5,
+                                interactiveBudgetMs: 10 ** 9 })
+  assert.equal(r.summary.kneeN, 2)
+  assert.equal(r.summary.limiter, 'none — every N in the sweep stayed inside the budget')
+})
+
+test('an eviction of undelivered entries ends the sweep whatever the latency says', async () => {
+  const r = await steadyState({ ...SWEEP, maxlen: 5, serviceMs: 1000, ns: [50],
+                                minutes: 5, interactiveBudgetMs: 10 ** 9 })
+  assert.ok(r.rows[0].evictedUndelivered > 0)
+  assert.equal(r.summary.kneeN, null)
+  assert.match(r.summary.limiter, /evict/i)
+})
+
+test('the herd sweep measures both curves on the same fleet', async () => {
+  const wide = { ...DEFAULT_TRANSPORT, backoff_base_s: 60, reconnect_jitter_pct: 100 }
+  const r = await reconnectHerd({ ...SWEEP, ns: [20], curves: {
+    shipped: DEFAULT_TRANSPORT, fleet: wide } })
+  const shipped = r.rows.find((x) => x.curve === 'shipped')
+  const fleet = r.rows.find((x) => x.curve === 'fleet')
+  assert.equal(shipped.arrived, 20)
+  assert.equal(fleet.arrived, 20)
+  assert.ok(fleet.windowMs > shipped.windowMs * 10,
+    'the fleet curve must actually spread the herd')
+  assert.ok(fleet.peakPerS < shipped.peakPerS)
+})
+
+test('every boat comes back, or the herd row says how many did not', async () => {
+  const r = await reconnectHerd({ ...SWEEP, ns: [20], curves: { shipped: DEFAULT_TRANSPORT },
+                                  waitMs: 1 })
+  assert.ok(r.rows[0].arrived < 20)
+  assert.equal(r.rows[0].missing, 20 - r.rows[0].arrived)
+})
+
+test('the storm sweep fills buffers, reconnects, and times the drain', async () => {
+  const r = await backfillStorm({ ...SWEEP, n: 20, offlineHours: 2 })
+  assert.ok(r.summary.bufferedAtReconnect > 0, 'nothing was buffered')
+  assert.ok(r.summary.drainMs > 0)
+  assert.ok('peakQueueDepth' in r.summary)
+  assert.ok('evictedUndelivered' in r.summary)
+  assert.ok('p99InteractiveMs' in r.summary)
+})
+
+test('the storm says out loud whether interactive traffic survived it', async () => {
+  const r = await backfillStorm({ ...SWEEP, n: 20, offlineHours: 2,
+                                  interactiveBudgetMs: 2000 })
+  assert.equal(typeof r.summary.interactiveSurvived, 'boolean')
+})
+
+test('every report carries the params it was produced with', async () => {
+  const r = await steadyState({ ...SWEEP, ns: [1], minutes: 1 })
+  assert.equal(r.params.serviceMs, 20)
+  assert.equal(r.params.seed, 3)
+  assert.ok(r.generatedAt)
+})
+
+// ── The sweeps: beyond the plan's list ──────────────────────────────────────
+
+test('the interactive probe counts the longest waits, not only the finished ones', () => {
+  // A probe that only recorded waits that had completed by the end of the run
+  // would drop the tail at saturation — the exact waits the knee is about.
+  const { interactiveProbe } = require('../loadrig/sweeps')
+  const sink = createSink({ serviceMs: 100, maxlen: 10_000, now: () => 0 })
+  const up = sink.uplinkFor({ boatId: 'b_1' })
+  for (let i = 0; i < 50; i += 1) up.publish('yey.boat.data', { values: [] }, {})
+  const probe = interactiveProbe(sink, { serviceMs: 100 })
+  probe.tick(0, 1000)
+  assert.equal(probe.count(), 1)
+  assert.equal(probe.p99(), 51 * 100)
+})
+
+test('the steady queueDepth is the undelivered backlog, not the stream length', async () => {
+  // Handled entries stay in the stream until MAXLEN trims them, so the stream
+  // length only grows; using it as "depth" would make every N look backed up.
+  const r = await steadyState({ ...SWEEP, serviceMs: 1, ns: [5], minutes: 2 })
+  assert.equal(r.rows[0].queueDepth, 0)
+  assert.ok(r.rows[0].streamLength > 0)
+})
+
+test('a steady fleet is not phase-locked: boats boot across one flush interval', async () => {
+  const f = createFleet({ n: 50, trace: TRACE, plan: PLAN, seed: 5, startSpreadMs: 5000 })
+  await f.start()
+  const at = f.sink.hellos().map((h) => h.at)
+  assert.equal(at.length, 50)
+  assert.ok(Math.max(...at) - Math.min(...at) > 3000, 'the boats all booted together')
+})
+
+test('the herd accepts a fleet curve that is a function of N', async () => {
+  const seen = []
+  const r = await reconnectHerd({ ...SWEEP, ns: [5, 30], curves: {
+    fleet: (n) => { seen.push(n); return { ...DEFAULT_TRANSPORT, backoff_base_s: n } } } })
+  assert.deepEqual(seen, [5, 30])
+  assert.equal(r.rows[1].transport.backoff_base_s, 30)
+  assert.ok(r.rows[1].lastMs > 20_000)
+})
+
+test('the storm, link_down: today\'s connector buffers nothing while the cloud is unreachable', async () => {
+  // onLinkLost closes the SignalK subscription and cycle() reopens it only
+  // after a successful handshake, so an unreachable cloud means no sampling.
+  // This pins the behaviour so a connector fix shows up here as a change.
+  const r = await backfillStorm({ ...SWEEP, n: 5, offlineHours: 1, mode: 'link_down' })
+  assert.equal(r.summary.mode, 'link_down')
+  assert.equal(r.summary.gatheredDuringOutage, 0)
+  // What is left is the few seconds not yet flushed when the link dropped.
+  assert.ok(r.summary.bufferedPerBoat <= 1)
+  // Drained only once every boat has come back, at its next retry.
+  assert.ok(r.summary.drainMs > 1000, `drained at ${r.summary.drainMs}ms, before any boat returned`)
+})
+
+test('the storm, buffered: the drain is chunked backfill and the fleet does drain', async () => {
+  const r = await backfillStorm({ ...SWEEP, n: 5, offlineHours: 1, serviceMs: 5,
+                                  maxlen: 100_000 })
+  assert.ok(r.summary.bufferedPerBoat > 100)
+  assert.ok(r.summary.backfillMessages > 0)
+  assert.equal(r.summary.drained, true)
+  assert.ok(r.summary.gatheredDuringOutage > 0)
+  assert.ok(r.summary.backfillBytesPerEntry > 1000, 'a backfill chunk is many records')
+})
+
+test('the sink refuses while unreachable and rejects without enqueueing while not accepting', async () => {
+  const sink = createSink({ now: () => 0 })
+  const up = sink.uplinkFor({ boatId: 'b_1' })
+  sink.setReachable(false)
+  await assert.rejects(up.connect(), (e) => e.code === 'offline')
+  await assert.rejects(up.publish('yey.boat.data', {}), (e) => e.code === 'offline')
+  sink.setReachable(true)
+  sink.setAccepting(false)
+  const ack = await up.publish('yey.boat.data', {})
+  assert.equal(ack.status, 'rejected')
+  assert.equal(sink.stats().entries, 0)
+})
+
+test('sweeps with the same seed and a pinned generatedAt are byte-identical', async () => {
+  const go = () => steadyState({ ...SWEEP, ns: [3, 6], minutes: 2,
+                                 generatedAt: '2026-01-01T00:00:00Z' })
+  assert.equal(JSON.stringify(await go()), JSON.stringify(await go()))
+})
+
+// ── membuffer: the rig's buffer must behave like the boat's ─────────────────
+
+test('membuffer matches lib/buffer.js op for op on a random workload', () => {
+  const { createBuffer } = require('../lib/buffer')
+  const { createMemBuffer } = require('../loadrig/membuffer')
+  const { mulberry32 } = require('../loadrig/fleet')
+  for (const seed of [1, 2, 3, 4]) {
+    const rnd = mulberry32(seed)
+    let clock = 1_000_000
+    const opts = { maxBytes: 6000, maxAgeMs: 60_000, now: () => clock }
+    const real = createBuffer({ dir: null, ...opts })
+    const mine = createMemBuffer(opts)
+    for (let i = 0; i < 3000; i += 1) {
+      clock += Math.floor(rnd() * 400)
+      const r = rnd()
+      if (r < 0.6) {
+        const rec = { t: clock, priority: ['high', 'normal', 'low'][Math.floor(rnd() * 3)],
+                      p: 'x', v: Math.floor(rnd() * 1e6), pad: 'y'.repeat(Math.floor(rnd() * 40)) }
+        assert.deepEqual(mine.append(rec), real.append(rec))
+      } else if (r < 0.85) {
+        const k = 1 + Math.floor(rnd() * 20)
+        const a = real.peek(k)
+        const b = mine.peek(k)
+        assert.deepEqual(b, a, `peek diverged at op ${i} seed ${seed}`)
+        if (rnd() < 0.7) { real.commit(a.cursor); mine.commit(b.cursor) }
+      }
+      assert.deepEqual(mine.stats(), real.stats(), `stats diverged at op ${i} seed ${seed}`)
+    }
+  }
+})

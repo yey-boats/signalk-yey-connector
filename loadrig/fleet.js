@@ -12,6 +12,7 @@
 const { createRuntime } = require('../lib/runtime')
 const { createTraceSource } = require('./source')
 const { createSink } = require('./sink')
+const { createMemBuffer } = require('./membuffer')
 
 /** Deterministic PRNG. Math.random would make every run unrepeatable, and an
  *  unrepeatable capacity number is an anecdote. */
@@ -98,13 +99,22 @@ function fakeTimers (startMs = 1_000_000) {
   }
 }
 
+/**
+ *  memBuffer     true swaps lib/buffer.js for loadrig/membuffer.js (same
+ *                behaviour, O(1) per op) — needed for hours of buffered data.
+ *  startSpreadMs boot the boats at seeded-random offsets in [0, spread) rather
+ *                than all at one instant. A fleet that has been up for a while
+ *                is not phase-locked; one that just reconnected is (dropAll).
+ */
 function createFleet ({ n = 10, trace, plan, serviceMs = 20, maxlen = 50000,
-                        seed = 1, options = {}, drainStepMs = 1000 } = {}) {
+                        seed = 1, options = {}, drainStepMs = 1000,
+                        memBuffer = false, startSpreadMs = 0 } = {}) {
   const timers = fakeTimers()
   const random = mulberry32(seed)
   const sink = createSink({ serviceMs, maxlen, now: timers.now, plan })
   const sources = []
   const uplinks = []
+  const buffers = []
   let droppedAt = null
   let helloMark = 0            // index into sink.hellos() at the last drop
 
@@ -114,6 +124,8 @@ function createFleet ({ n = 10, trace, plan, serviceMs = 20, maxlen = 50000,
     sources.push(source)
     const uplink = sink.uplinkFor({ boatId })
     uplinks.push(uplink)
+    const buffer = memBuffer ? createMemBuffer({ now: timers.now }) : null
+    if (buffer) buffers.push(buffer)
     const runtime = createRuntime({
       // getDataDirPath null keeps the buffer and the state file IN MEMORY.
       // buffer.append reads and rewrites whole lane files on every sample
@@ -125,6 +137,7 @@ function createFleet ({ n = 10, trace, plan, serviceMs = 20, maxlen = 50000,
       deps: {
         createUplink: () => uplink,
         source,
+        ...(buffer ? { buffer } : {}),
         now: timers.now,
         setTimeout: timers.setTimeout,
         clearTimeout: timers.clearTimeout,
@@ -174,8 +187,27 @@ function createFleet ({ n = 10, trace, plan, serviceMs = 20, maxlen = 50000,
     runtimes,
     sources,
     async start () {
+      if (startSpreadMs > 0) {
+        for (const r of runtimes) {
+          timers.setTimeout(() => r.start(), Math.floor(random() * startSpreadMs))
+        }
+        await advanceTo(timers.now() + startSpreadMs)
+        return
+      }
       for (const r of runtimes) await r.start()
       for (const s of sources) s.pump(timers.now())
+    },
+    /** Records sitting in boat buffers, fleet-wide. Cheap with memBuffer. */
+    buffered () {
+      if (buffers.length) return buffers.reduce((sum, b) => sum + b.stats().count, 0)
+      return runtimes.reduce((sum, r) => sum + (r.snapshot().buffered || 0), 0)
+    },
+    /** Every runtime connected and past its handshake. */
+    allRunning () { return runtimes.every((r) => r.snapshot().state === 'running') },
+    /** The largest single-boat buffer, so "drained" can mean every boat. */
+    maxBuffered () {
+      if (buffers.length) return Math.max(0, ...buffers.map((b) => b.stats().count))
+      return Math.max(0, ...runtimes.map((r) => r.snapshot().buffered || 0))
     },
     /** What a deploy does: every socket drops at the same instant. */
     dropAll (why = 'deploy') {

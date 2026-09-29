@@ -45,12 +45,27 @@ function createSink ({ serviceMs = 20, maxlen = 50000, now = Date.now,
   let bytesTotal = 0
   let entries = 0
   let maxUndelivered = 0
+  // Bytes currently IN the stream (delivered-but-untrimmed included, as in
+  // Redis). MAXLEN is a count; this is what that count costs in memory.
+  let streamBytes = 0
+  let peakStreamBytes = 0
   let helloCount = 0
   let lastDrain = null
   // Fractional service time carried between drains, so drain(10) ten times
   // with serviceMs=20 handles five messages rather than none.
   let carryMs = 0
+  // Two ways the cloud can be "down" for a boat, which the connector treats
+  // very differently (see loadrig/sweeps.js backfillStorm):
+  //   reachable=false  the socket cannot be (re)established: connect() throws,
+  //                    so the runtime is in its reconnect loop;
+  //   accepting=false  the socket is up but ingress refuses every package
+  //                    (status 'rejected'), so the runtime keeps sampling and
+  //                    keeps everything in its buffer.
+  let reachable = true
+  let accepting = true
+  let rejectedPublishes = 0
   const perSubject = Object.create(null)
+  const bytesBySubject = Object.create(null)
   const hellos = []         // [{ at, boatId }] in arrival order
 
   const live = () => queue.length - head
@@ -67,10 +82,13 @@ function createSink ({ serviceMs = 20, maxlen = 50000, now = Date.now,
     bytesTotal += bytes
     entries += 1
     perSubject[subject] = (perSubject[subject] || 0) + 1
+    bytesBySubject[subject] = (bytesBySubject[subject] || 0) + bytes
     seq += 1
     const id = `${seq}-0`
     queue.push({ id, subject, bytes })
+    streamBytes += bytes
     while (live() > maxlen) {
+      streamBytes -= queue[head].bytes
       head += 1
       evicted += 1
       // MAXLEN trims the head regardless of acknowledgement. If the head was
@@ -80,6 +98,7 @@ function createSink ({ serviceMs = 20, maxlen = 50000, now = Date.now,
       else evictedUndelivered += 1
     }
     compact()
+    if (streamBytes > peakStreamBytes) peakStreamBytes = streamBytes
     const undelivered = live() - deliveredPrefix
     if (undelivered > maxUndelivered) maxUndelivered = undelivered
     return id
@@ -101,6 +120,12 @@ function createSink ({ serviceMs = 20, maxlen = 50000, now = Date.now,
     lastDrain = now()
   }
 
+  function unreachable () {
+    const err = new Error('cloud unreachable (rig)')
+    err.code = 'offline'
+    return err
+  }
+
   return {
     /** An uplink stand-in for one boat. Same surface lib/uplink.js exports. */
     uplinkFor (cfg) {
@@ -109,18 +134,28 @@ function createSink ({ serviceMs = 20, maxlen = 50000, now = Date.now,
       let connected = false
       return {
         async claimToken () { return { ok: true, federated_token: 'ft', expires_at: 0 } },
-        async connect () { connected = true },
+        async connect () {
+          if (!reachable) throw unreachable()
+          connected = true
+        },
         close () { connected = false },
         setOnLost (fn) { onLost = fn },
         state () { return { connected, pending_replies: 0 } },
         /** The socket dropped under the boat (a deploy, a network blip). */
         kill (why) { connected = false; onLost(why) },
         async publish (subject, payload) {
+          if (!reachable) throw unreachable()
+          if (!accepting) {
+            rejectedPublishes += 1
+            return { schema: INGRESS_SCHEMA, status: 'rejected', accepted: [],
+                     rejected: [{ message_id: '', reason: 'rig_not_accepting' }] }
+          }
           const id = enqueue(subject, payload)
           return { schema: INGRESS_SCHEMA, status: 'accepted',
                    accepted: [{ message_id: `m_${id}`, stream_id: id }], rejected: [] }
         },
         async request (subject, payload) {
+          if (!reachable) throw unreachable()
           if (subject === 'yey.boat.hello') {
             helloCount += 1
             hellos.push({ at: now(), boatId })
@@ -139,11 +174,15 @@ function createSink ({ serviceMs = 20, maxlen = 50000, now = Date.now,
       }
     },
     drain,
+    setReachable (v) { reachable = Boolean(v) },
+    setAccepting (v) { accepting = Boolean(v) },
     reset () {
       queue = []; head = 0; deliveredPrefix = 0; handled = 0; evicted = 0
       evictedUndelivered = 0; bytesTotal = 0; entries = 0; maxUndelivered = 0
-      helloCount = 0; hellos.length = 0; carryMs = 0
+      streamBytes = 0; peakStreamBytes = 0
+      helloCount = 0; hellos.length = 0; carryMs = 0; rejectedPublishes = 0
       for (const k of Object.keys(perSubject)) delete perSubject[k]
+      for (const k of Object.keys(bytesBySubject)) delete bytesBySubject[k]
     },
     /** Hellos in arrival order, with the boat that sent each. */
     hellos () { return hellos.slice() },
@@ -159,9 +198,13 @@ function createSink ({ serviceMs = 20, maxlen = 50000, now = Date.now,
         entries,
         bytesTotal,
         bytesPerEntry: entries ? Math.round(bytesTotal / entries) : 0,
+        streamBytes,
+        peakStreamBytes,
+        rejectedPublishes,
         helloCount,
         helloAt: hellos.map((h) => h.at),
         perSubject: { ...perSubject },
+        bytesBySubject: { ...bytesBySubject },
         lastDrain
       }
     }
