@@ -8,3 +8,9 @@ package-lock.json.bak
 # (security.json carries a password hash). Only settings.json is ours.
 test/e2e/signalk-config/*
 !test/e2e/signalk-config/settings.json
+
+# Load rig: a captured/derived trace is megabytes and reproducible
+# (loadrig/capture.js, loadrig/derive-trace.py); sweep output is per run.
+loadrig/trace.json
+loadrig/out/
+__pycache__/

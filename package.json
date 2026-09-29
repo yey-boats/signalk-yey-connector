@@ -23,7 +23,8 @@
     "test": "node --test test/*.test.js",
     "test:e2e": "node --test --test-timeout=60000 test/e2e/*.test.js",
     "test:contract": "node --test test/contract.test.js",
-    "check": "node --check index.js && npm test"
+    "check": "node --check index.js && npm test",
+    "loadrig": "node loadrig/run.js"
   },
   "signalk": {
     "displayName": "yey — cloud connector"
