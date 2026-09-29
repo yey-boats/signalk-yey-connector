@@ -383,3 +383,56 @@ test('the refresh point is spent at reconnect — not on a timer', async () => {
   await u.connect()
   assert.equal(claims, 2, 'a reconnect past the refresh point must re-claim')
 })
+
+// ── The reconnect herd, as a number ─────────────────────────────────────────
+// Y7 depends on these two figures and quotes them in the capacity report. They
+// are pinned here so that a change to DEFAULT_TRANSPORT names the new fleet
+// behaviour in a diff instead of quietly moving the go/no-go.
+
+/** The window the FIRST reconnect attempt lands in, in seconds, for a whole
+ *  fleet dropped at the same instant. backoffDelayMs applies SYMMETRIC jitter
+ *  (factor = 1 + (rand()*2-1)*pct), so attempt 1 is uniform over
+ *  base*[1-pct, 1+pct]. */
+function firstAttemptWindowS (transport) {
+  const lo = backoffDelayMs(1, transport, () => 0) / 1000
+  const hi = backoffDelayMs(1, transport, () => 1) / 1000
+  return { lo, hi, widthS: hi - lo }
+}
+
+test('at the shipped defaults a dropped fleet redials inside a 1.2 second window', () => {
+  const w = firstAttemptWindowS(DEFAULT_TRANSPORT)
+  assert.equal(w.lo, 1.4)
+  assert.equal(w.hi, 2.6)
+  assert.equal(Number(w.widthS.toFixed(3)), 1.2)
+  // 500 boats over 1.2s. Each also fires one REST signalk_boat_token_claim
+  // before its socket (createUplink.connect -> claimToken), so it is that many
+  // HTTP requests per second as well as that many socket.io handshakes.
+  assert.equal(Math.round(500 / w.widthS), 417)
+})
+
+test('pushed to the bounds the same knobs spread the same fleet over two minutes', () => {
+  const w = firstAttemptWindowS({
+    ...DEFAULT_TRANSPORT, backoff_base_s: 60, reconnect_jitter_pct: 100
+  })
+  assert.equal(w.lo, 0)
+  assert.equal(w.hi, 120)
+  assert.equal(Number((500 / w.widthS).toFixed(1)), 4.2)
+})
+
+test('zero jitter is expressible and is the pathological case', () => {
+  const w = firstAttemptWindowS({ ...DEFAULT_TRANSPORT, reconnect_jitter_pct: 0 })
+  assert.equal(w.widthS, 0, 'no jitter means every boat redials at the same instant')
+})
+
+test('backoffDelayMs never returns a tight retry loop at the shipped defaults', () => {
+  // Spec :1549 — "Client-side defaults must still be safe on their own
+  // (jittered exponential backoff, never a tight retry loop) for the case where
+  // a boat reconnects before receiving any plan."
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    for (const r of [0, 0.5, 1]) {
+      const ms = backoffDelayMs(attempt, DEFAULT_TRANSPORT, () => r)
+      assert.ok(ms >= 1400, `attempt ${attempt} rand ${r} returned ${ms}ms`)
+      assert.ok(ms <= 300 * 1000 * 1.3, `attempt ${attempt} exceeded the ceiling`)
+    }
+  }
+})
