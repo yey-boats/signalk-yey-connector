@@ -247,11 +247,12 @@ async function reconnectHerd ({ ns = [50, 100, 250, 500], curves = {}, trace, pl
  *    connected while ingress refuses every package, so the real runtime keeps
  *    sampling and every record stays in its (real-semantics) buffer; then the
  *    fleet drops and reconnects, as after an outage, and drains.
- *  mode 'link_down' — what TODAY's connector does in a real outage: the cloud
- *    is unreachable, the runtime sits in its reconnect loop, and — because
- *    onLinkLost closes the SignalK subscription and cycle() only reopens it
- *    after a successful handshake — it buffers nothing. Measured so the report
- *    can state that as a number rather than as a reading of the code.
+ *  mode 'link_down' — a real outage: the cloud is unreachable and the runtime
+ *    sits in its reconnect loop, still sampling into its buffer (a lost cloud
+ *    link keeps the SignalK subscription open). The boats then return at their
+ *    next retry, spread by the curve's jitter rather than by one drop. (Before
+ *    fix/record-while-offline the connector closed the subscription here and
+ *    gathered nothing; this mode is what showed it.)
  */
 async function backfillStorm ({ n = 250, offlineHours = 24, trace, plan, seed = 1,
                                serviceMs = 20, maxlen = 50000,

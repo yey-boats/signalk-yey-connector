@@ -584,16 +584,18 @@ test('the herd accepts a fleet curve that is a function of N', async () => {
   assert.ok(r.rows[1].lastMs > 20_000)
 })
 
-test('the storm, link_down: today\'s connector buffers nothing while the cloud is unreachable', async () => {
-  // onLinkLost closes the SignalK subscription and cycle() reopens it only
-  // after a successful handshake, so an unreachable cloud means no sampling.
-  // This pins the behaviour so a connector fix shows up here as a change.
-  const r = await backfillStorm({ ...SWEEP, n: 5, offlineHours: 1, mode: 'link_down' })
+test('the storm, link_down: the connector keeps gathering while the cloud is unreachable', async () => {
+  // Before fix/record-while-offline, onLinkLost closed the SignalK
+  // subscription and a real outage gathered nothing (gatheredDuringOutage 0).
+  // Now a lost cloud link keeps sampling into the buffer, and the outage is
+  // backfilled on reconnect — the storm the spec worries about is real.
+  const r = await backfillStorm({ ...SWEEP, n: 5, offlineHours: 1, mode: 'link_down',
+                                  serviceMs: 5, maxlen: 100_000 })
   assert.equal(r.summary.mode, 'link_down')
-  assert.equal(r.summary.gatheredDuringOutage, 0)
-  // What is left is the few seconds not yet flushed when the link dropped.
-  assert.ok(r.summary.bufferedPerBoat <= 1)
-  // Drained only once every boat has come back, at its next retry.
+  assert.ok(r.summary.gatheredDuringOutage > 5 * 100,
+    `only ${r.summary.gatheredDuringOutage} records gathered in an hour offline`)
+  assert.ok(r.summary.backfillMessages > 0, 'the outage was not backfilled')
+  assert.equal(r.summary.drained, true)
   assert.ok(r.summary.drainMs > 1000, `drained at ${r.summary.drainMs}ms, before any boat returned`)
 })
 

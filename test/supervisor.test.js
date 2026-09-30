@@ -53,7 +53,8 @@ function fakeTimers () {
  * `script` is consumed one entry per connect attempt: an Error means "this
  * connect fails", anything else is the plan the hello answers with.
  */
-function harness ({ script = [], options = {}, plan = planV(1) } = {}) {
+function harness ({ script = [], options = {}, plan = planV(1), plans = [],
+                   consent = CONSENT } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yey-sup-'))
   const timers = fakeTimers()
   const events = []
@@ -79,6 +80,8 @@ function harness ({ script = [], options = {}, plan = planV(1) } = {}) {
     },
     request: async (subject) => {
       events.push(`request:${subject}`)
+      // `plans` scripts successive hellos; the last one keeps answering.
+      if (plans.length) plan = plans.length > 1 ? plans.shift() : plans[0]
       return { kind: 'plan', plan, etag: `e${plan.version}` }
     }
   }
@@ -89,7 +92,9 @@ function harness ({ script = [], options = {}, plan = planV(1) } = {}) {
       sampleSink = onSample
       sourceClose = onClose
       events.push('subscribe')
-      return { close: () => { events.push('unsubscribe'); sourceClose = null } }
+      // A closed subscription delivers nothing: without this the fake would
+      // keep feeding samples to a runtime that had stopped listening.
+      return { close: () => { events.push('unsubscribe'); sourceClose = null; sampleSink = null } }
     },
     selfTree: async () => ({ navigation: { position: { value: { latitude: 45, longitude: 13 } } } }),
     collectMeta: async () => ({}),
@@ -112,14 +117,19 @@ function harness ({ script = [], options = {}, plan = planV(1) } = {}) {
   })
   // Pairing normally supplies this; without it applyPlan refuses every mapping
   // as outside_consent and the sample tests below would pass for the wrong reason.
-  runtime.setConsent(CONSENT)
+  runtime.setConsent(consent)
 
   return {
     runtime, timers, events, dir,
     connects: () => connects,
     subscriptions: () => subscriptions,
     sample: (s) => sampleSink && sampleSink(s),
-    killSource: (why) => sourceClose && sourceClose(why),
+    killSource: (why) => {
+      const fn = sourceClose
+      sourceClose = null
+      sampleSink = null
+      if (fn) fn(why)
+    },
     /** What lib/uplink.js does on a socket 'disconnect' or 'connect_error'. */
     killSocket: (why) => lostFn && lostFn(why)
   }
@@ -336,4 +346,199 @@ test('non-test code actually calls the loop', () => {
                       'uplink.setOnLost(onLinkLost)']) {
     assert.ok(src.includes(call), `lib/runtime.js never calls ${call}`)
   }
+})
+
+// ── Gathering through an outage ─────────────────────────────────────────────
+// Spec "Offline buffer and backfill": the buffer "is what makes 'you were out
+// of signal, here's your track' possible at all", and the Y2 plan's goal is a
+// connector that "buffers-and-replays [values] across an outage". A transient
+// loss of the CLOUD link therefore must not stop the SignalK subscription:
+// samples keep flowing through the plan's policies and budget into the buffer,
+// and the reconnect backfills them. What does stop gathering: stop/unpair, a
+// credential the cloud refuses (revoked), a plan with nothing in it, and
+// consent withdrawn locally.
+
+const POS = (lat = 45) => ({ path: 'navigation.position', value: { latitude: lat, longitude: 13 } })
+const unsubscribes = (h) => h.events.filter((e) => e === 'unsubscribe').length
+const unreachable = () => { const e = new Error('fetch failed'); e.code = 'network_error'; return e }
+
+test('a dropped cloud link keeps the SignalK subscription and keeps buffering', async () => {
+  const h = harness()
+  await h.runtime.start()
+  h.killSocket('disconnect: transport close')
+  assert.equal(unsubscribes(h), 0, 'a cloud outage must not close the SignalK stream')
+  h.sample(POS(45)); h.timers.advance(1000); h.sample(POS(46))
+  assert.equal(h.runtime.snapshot().buffered, 2)
+  assert.equal(h.runtime.snapshot().gathering, true)
+  h.runtime.stop()
+})
+
+test('a long outage keeps gathering across every failed retry, and the reconnect backfills it', async () => {
+  const h = harness({ script: [undefined, unreachable(), unreachable(), unreachable()] })
+  await h.runtime.start()
+  h.killSocket('disconnect: transport close')
+  for (let i = 0; i < 3; i += 1) {
+    h.sample(POS(45 + i))
+    await h.timers.fire()                    // a retry that fails
+    assert.match(h.runtime.snapshot().state, /reconnecting/)
+  }
+  assert.equal(h.runtime.snapshot().buffered, 3, 'every sample of the outage is kept')
+  await h.timers.fire()                      // the retry that succeeds
+  assert.equal(h.runtime.snapshot().state, 'running')
+  await h.timers.fire()                      // first tick after reconnect
+  assert.equal(h.runtime.snapshot().buffered, 0)
+  assert.ok(h.events.some((e) => e.startsWith('publish:yey.boat.')) &&
+            h.events.includes('publish:yey.boat.data'))
+  h.runtime.stop()
+})
+
+test('a reconnect does not open a second subscription', async () => {
+  const h = harness()
+  await h.runtime.start()
+  h.killSocket('disconnect: transport close')
+  await h.timers.fire()
+  assert.equal(h.runtime.snapshot().state, 'running')
+  assert.equal(h.subscriptions(), 1)
+  assert.equal(unsubscribes(h), 0)
+  h.runtime.stop()
+})
+
+test('a plugin that was never paired gathers nothing', async () => {
+  const h = harness({ options: { boatId: '', boatCredential: '' } })
+  await h.runtime.start()
+  assert.equal(h.subscriptions(), 0)
+  assert.equal(h.runtime.snapshot().gathering, false)
+})
+
+test('a boat that has never received a plan gathers nothing while it cannot connect', async () => {
+  // No plan means no mapping, no policy and no budget to gather under. The plan
+  // body is not persisted, so this is also the state after a restart offline.
+  const h = harness({ script: [unreachable(), unreachable()] })
+  await h.runtime.start()
+  await h.timers.fire()
+  assert.equal(h.subscriptions(), 0)
+  assert.equal(h.runtime.snapshot().gathering, false)
+  h.runtime.stop()
+})
+
+test('a revoked credential stops gathering, though the retry curve continues', async () => {
+  const revoked = new Error('invalid_credential'); revoked.code = 'invalid_credential'
+  const h = harness({ script: [undefined, revoked] })
+  await h.runtime.start()
+  h.killSocket('disconnect: transport close')
+  h.sample(POS(45))
+  await h.timers.fire()                      // the cloud refuses the credential
+  assert.equal(unsubscribes(h), 1, 'a revoked boat must stop reading the boat')
+  assert.equal(h.runtime.snapshot().gathering, false)
+  h.sample(POS(46))
+  assert.equal(h.runtime.snapshot().buffered, 1, 'nothing after the refusal is gathered')
+  assert.equal(h.timers.pending().length, 1, 'the retry curve still runs')
+  h.runtime.stop()
+})
+
+test('a plan withdrawn to no mappings stops gathering', async () => {
+  const empty = { ...planV(2), mappings: [] }
+  const h = harness({ plans: [planV(1), empty] })
+  await h.runtime.start()
+  h.killSocket('disconnect: transport close')
+  await h.timers.fire()                      // reconnect: the cloud now plans nothing
+  assert.equal(h.runtime.snapshot().active_mappings, 0)
+  assert.equal(unsubscribes(h), 1)
+  assert.equal(h.runtime.snapshot().gathering, false)
+  h.runtime.stop()
+})
+
+test('a plan refused whole stops gathering', async () => {
+  const future = { ...planV(2), schema: 99 }
+  const h = harness({ plans: [planV(1), future] })
+  await h.runtime.start()
+  h.killSocket('disconnect: transport close')
+  await h.timers.fire()
+  assert.equal(h.runtime.snapshot().gathering, false)
+  h.runtime.stop()
+})
+
+test('consent withdrawn while offline stops gathering what it no longer covers', async () => {
+  const h = harness()
+  await h.runtime.start()
+  h.killSocket('disconnect: transport close')
+  h.sample(POS(45))
+  h.runtime.setConsent([])
+  assert.equal(h.runtime.snapshot().active_mappings, 0)
+  assert.equal(h.runtime.snapshot().gathering, false)
+  h.sample(POS(46))
+  assert.equal(h.runtime.snapshot().buffered, 1)
+  h.runtime.stop()
+})
+
+test('a changed plan on reconnect applies to the same subscription', async () => {
+  const SOG = { path: 'navigation.speedOverGround', as: 'sog', policy: 'periodic',
+                min_interval_s: 0, max_interval_s: 600, priority: 'normal' }
+  const v2 = { ...planV(2), mappings: [SOG] }
+  const h = harness({ plans: [planV(1), v2],
+                      consent: ['navigation.position', 'navigation.speedOverGround'] })
+  await h.runtime.start()
+  h.killSocket('disconnect: transport close')
+  await h.timers.fire()
+  assert.equal(h.runtime.snapshot().plan_version, 2)
+  assert.equal(h.subscriptions(), 1, 'one stream, whatever the plan')
+  h.sample(POS(45))
+  h.sample({ path: 'navigation.speedOverGround', value: 2.5 })
+  const snap = h.runtime.snapshot()
+  assert.equal(snap.buffered, 1, 'only the new plan\'s path is gathered')
+  h.runtime.stop()
+})
+
+test('a SignalK stream that dies during the outage is reopened on the next retry, once', async () => {
+  const h = harness({ script: [undefined, unreachable(), unreachable()] })
+  await h.runtime.start()
+  h.killSocket('disconnect: transport close')
+  h.killSource('ECONNRESET')
+  assert.equal(h.runtime.snapshot().gathering, false)
+  await h.timers.fire()                      // retry fails, but the stream is back
+  assert.equal(h.subscriptions(), 2)
+  assert.equal(h.runtime.snapshot().gathering, true)
+  h.sample(POS(45))
+  assert.equal(h.runtime.snapshot().buffered, 1)
+  await h.timers.fire()                      // another failed retry: no third stream
+  assert.equal(h.subscriptions(), 2)
+  h.runtime.stop()
+})
+
+test('the buffer caps bound a long outage', async () => {
+  const h = harness({ options: { bufferMegabytes: 1 } })
+  await h.runtime.start()
+  h.killSocket('disconnect: transport close')
+  const pad = 'x'.repeat(4000)
+  for (let i = 0; i < 400; i += 1) {
+    h.timers.advance(1000)
+    h.sample({ path: 'navigation.position', value: { latitude: 45 + i / 1000, longitude: 13, pad } })
+  }
+  const snap = h.runtime.snapshot()
+  assert.ok(snap.buffer_bytes <= 1024 * 1024, `buffer grew to ${snap.buffer_bytes} bytes`)
+  assert.ok(snap.buffer_dropped > 0, 'the byte cap never bound')
+  // And the age cap: a day later, what was gathered before it is gone.
+  h.timers.advance(25 * 3600 * 1000)
+  h.sample(POS(50))
+  assert.equal(h.runtime.snapshot().buffered, 1)
+  h.runtime.stop()
+})
+
+test('stop ends gathering even mid-outage', async () => {
+  const h = harness()
+  await h.runtime.start()
+  h.killSocket('disconnect: transport close')
+  h.runtime.stop()
+  assert.equal(unsubscribes(h), 1)
+  assert.equal(h.runtime.snapshot().gathering, false)
+})
+
+test('unpair ends gathering even mid-outage', async () => {
+  const h = harness()
+  await h.runtime.start()
+  h.killSocket('disconnect: transport close')
+  await h.runtime.unpair()
+  assert.equal(unsubscribes(h), 1)
+  h.sample(POS(46))
+  assert.equal(h.runtime.snapshot().buffered, 0)
 })
