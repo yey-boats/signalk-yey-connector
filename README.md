@@ -33,6 +33,12 @@ on the boat. The plugin reads SignalK in-process, so there is no SignalK token t
   `vessels/self` path (up to 250), and the gear manufacturer and model from SignalK `meta`.
   This lists paths, not their values, and it is sent whatever the plan selects, so the web
   page can show what you could turn on.
+- **Answers to questions yey.boats asks, one value at a time.** Over the same outbound
+  connection the cloud may ask for the current value, metadata or (if this server has a
+  history provider) the history of a single path, when the navigator needs it to answer
+  you. The boat answers only paths inside your consent that the plan either sends or marks
+  *on request*, never a denied path, never a write or control (those are refused), at most
+  30 a minute, each answer capped at 64 KB.
 - Values that could not be sent during an outage are buffered on the boat (50 MB by
   default) and replayed when the link comes back. The same consent and deny rules apply
   to the replay.
