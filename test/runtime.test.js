@@ -39,7 +39,7 @@ const SOURCE_STUB = {
  *  returned not_modified unconditionally would pass just as happily with the
  *  connector sending its own hash — which is the bug this shape exists to catch.
  */
-function harness ({ replies = [], options = {},
+function harness ({ replies = [], options = {}, reported = [],
                    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yey-rt-')) } = {}) {
   const published = []
   const requests = []
@@ -75,7 +75,8 @@ function harness ({ replies = [], options = {},
   }
 
   const runtime = createRuntime({
-    app: { debug: () => {}, getDataDirPath: () => dir },
+    app: { debug: () => {}, getDataDirPath: () => dir,
+           reportOutputMessages: (n) => reported.push(n) },
     version: '0.1.0',
     options: { enabled: true, boatId: 'b_1', boatCredential: 'bk_1', ...options },
     deps: {
@@ -489,4 +490,18 @@ test('with an empty plan (gathering off) the tree is still checked for new paths
   await h.runtime.tick()
   assert.equal(h.published.filter((p) => p.subject === 'yey.boat.catalog').length, 2)
   assert.equal(h.requests.length, 2, 'new paths -> re-plan')
+})
+
+test('sent values are reported to SignalK so the plugin shows in Connection activity', async () => {
+  const reported = []
+  const h = harness({ reported, replies: [{ kind: 'plan', plan: planV(1, [POSITION]), etag: 'e1' }] })
+  h.runtime.setConsent(CONSENT)
+  await h.runtime.handshake()
+  h.runtime.onSample({ path: 'navigation.position', value: { latitude: 45, longitude: 13 } })
+  h.runtime.__setPublish(async () => ({ status: 'rejected', accepted: [], rejected: [] }))
+  await h.runtime.flush()
+  assert.deepEqual(reported, [], 'nothing reported for a rejected batch')
+  h.runtime.__setPublish(async () => ({ status: 'accepted', accepted: [{}], rejected: [] }))
+  await h.runtime.flush()
+  assert.deepEqual(reported, [1])
 })
