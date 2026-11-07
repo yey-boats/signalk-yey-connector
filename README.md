@@ -39,20 +39,20 @@ that than promise one.
 
 ## Install
 
-The plugin is licensed under Apache-2.0. It is not on the SignalK Appstore or npm
-yet. Until it is, install from a release tarball or a checkout:
+Not in the SignalK Appstore yet. Install straight from this repository, pinned to a
+release, in the SignalK server's data directory:
 
 ```bash
-cd ~/.signalk                         # the server's data directory
-npm install <path-or-URL-to>/signalk-yey-connector-<version>.tgz
-# or, from a checkout:
-#   git clone https://github.com/yey-boats/signalk-yey-connector node_modules/signalk-yey-connector
-#   (cd node_modules/signalk-yey-connector && npm install --omit=dev)
+cd ~/.signalk
+# from a release tarball (no git needed on the boat):
+npm install https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.1.0/signalk-yey-connector-0.1.0.tgz
+# or straight from the tagged source (needs git):
+npm install github:yey-boats/signalk-yey-connector#v0.1.0
 ```
 
 Restart the server. The plugin appears under **Server → Plugin Config** as
 "yey — cloud connector", and its page under **Webapps** at
-`/signalk-yey-connector/`.
+`/signalk-yey-connector/`. To update, run the same command with the newer tag.
 
 ## Pairing
 
