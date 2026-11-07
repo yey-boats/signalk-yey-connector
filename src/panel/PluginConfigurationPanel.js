@@ -258,7 +258,7 @@ export default function PluginConfigurationPanel (props) {
     connection = h('form', { onSubmit: onConnect },
       h('p', { className: 'small' },
         'On ',
-        h('a', { href: DEFAULT_ORIGIN + '/setup?source=plugin', target: '_blank', rel: 'noopener noreferrer' }, 'yey.boats'),
+        h('a', { href: DEFAULT_ORIGIN + '/account?source=plugin', target: '_blank', rel: 'noopener noreferrer' }, 'yey.boats'),
         ', open Account → Connect a SignalK server and copy the link.'),
       field('yey-url', 'Connection URL',
         h('input', {
