@@ -100,10 +100,9 @@ module.exports = function signalkYeyConnectorPlugin (app) {
 
     statusMessage: () => (runtime ? runtime.statusMessage() : 'stopped'),
 
-    // Routes are served under /plugins/signalk-yey-connector/…: the
-    // connect-by-URL calls the Plugin Config panel makes (connect/resolve,
-    // connect/confirm, connect/key, status, disconnect), the older pairing
-    // calls, and GET / (public/index.html, kept for now, no longer advertised).
+    // Routes are served under /plugins/signalk-yey-connector/…: the calls the
+    // Plugin Config panel makes (connect/resolve, connect/confirm, connect/key,
+    // consent, status, disconnect). There is no standalone page any more.
     registerWithRouter: (router) => {
       router.use(jsonBody())
       registerRoutes(router, () => runtime)

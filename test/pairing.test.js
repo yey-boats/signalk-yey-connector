@@ -2,7 +2,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 
-const { requestClaim, pollClaim, redeemCode, pairingStatus, normalizePairCode, isValidPairCode } = require('../lib/pairing')
+const { redeemCode, pairingStatus, normalizePairCode, isValidPairCode } = require('../lib/pairing')
 
 const CFG = { cloudOrigin: 'https://x', tenant: 'home', project: 'demo',
               bundleId: 'signalk@2026-06-05' }
@@ -24,72 +24,6 @@ function scripted (script) {
     }
   }
 }
-
-test('requestClaim posts the hello and returns the claim material', async () => {
-  const s = scripted({
-    signalk_boat_claim_request: {
-      ok: true, claim_id: 'c1', claim_secret: 's1',
-      confirm_url: 'https://yey.boats/account/boats/new?claim=c1', expires_in: 1800
-    }
-  })
-  const claim = await requestClaim(CFG, { connector_version: '0.1.0' },
-    { callPublicOp: s.call })
-  assert.equal(s.calls[0].operation, 'signalk_boat_claim_request')
-  assert.deepEqual(s.calls[0].data, { hello: { connector_version: '0.1.0' } })
-  assert.equal(claim.claim_id, 'c1')
-  assert.equal(claim.claim_secret, 's1')
-  assert.match(claim.confirm_url, /source=plugin/,
-    'every outbound link carries source=plugin for the GA4 funnel')
-})
-
-test('requestClaim does not double a source the cloud already set', async () => {
-  const s = scripted({
-    signalk_boat_claim_request: {
-      ok: true, claim_id: 'c1', claim_secret: 's1',
-      confirm_url: 'https://yey.boats/x?claim=c1&source=email', expires_in: 60
-    }
-  })
-  const claim = await requestClaim(CFG, {}, { callPublicOp: s.call })
-  assert.equal(claim.confirm_url, 'https://yey.boats/x?claim=c1&source=email')
-})
-
-test('requestClaim surfaces a bundle-level error as an Error with its code', async () => {
-  const s = scripted({ signalk_boat_claim_request: { ok: false, error: 'rate_limited' } })
-  await assert.rejects(
-    () => requestClaim(CFG, {}, { callPublicOp: s.call }),
-    (err) => err.code === 'rate_limited')
-})
-
-test('pollClaim returns null while pending', async () => {
-  const s = scripted({ signalk_boat_claim_poll: { ok: true, status: 'pending' } })
-  const out = await pollClaim(CFG, { claim_id: 'c1', claim_secret: 's1' },
-    { callPublicOp: s.call })
-  assert.equal(out, null)
-  assert.deepEqual(s.calls[0].data, { claim_id: 'c1', claim_secret: 's1' })
-})
-
-test('pollClaim returns the boat and its credential once confirmed', async () => {
-  const s = scripted({
-    signalk_boat_claim_poll: {
-      ok: true, status: 'confirmed', boat_id: 'b_1', boat_credential: 'bk_x'
-    }
-  })
-  const out = await pollClaim(CFG, { claim_id: 'c1', claim_secret: 's1' },
-    { callPublicOp: s.call })
-  assert.deepEqual(out, { boat_id: 'b_1', boat_credential: 'bk_x' })
-})
-
-test('pollClaim refuses a confirmation that carries no credential', async () => {
-  /* The cloud caches the plaintext for the claim's lifetime; past that it
-     answers confirmed with no credential and the honest outcome is to re-pair,
-     not to come up half-bound with nothing to authenticate with. */
-  const s = scripted({
-    signalk_boat_claim_poll: { ok: true, status: 'confirmed', boat_id: 'b_1' }
-  })
-  await assert.rejects(
-    () => pollClaim(CFG, { claim_id: 'c1', claim_secret: 's1' }, { callPublicOp: s.call }),
-    (err) => err.code === 'credential_unavailable')
-})
 
 test('redeemCode sends the normalized code and the hello', async () => {
   const s = scripted({
