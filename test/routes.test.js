@@ -113,12 +113,13 @@ test('GET / serves the page statusMessage tells the owner to open', () => {
   assert.match(out.text, /<button id="btn-code">/)
 })
 
-test('the page the plugin points at is also the webapp the Appstore mounts', () => {
-  /* /signalk-yey-connector/ exists only because of the `signalk-webapp` keyword,
-     and statusMessage() names /plugins/signalk-yey-connector/ — the route above.
-     Both doors lead to the same file, so both are pinned. */
+test('the old page is still published and mounted', () => {
   const pkg = require('../package.json')
-  assert.ok(pkg.keywords.includes('signalk-webapp'))
+  // signalk-plugin-configurator mounts public/ at /signalk-yey-connector/ just
+  // as signalk-webapp did (signalk-server WEB_MOUNT_KEYWORDS), without listing
+  // the old page under Webapps.
+  assert.ok(pkg.keywords.includes('signalk-plugin-configurator'))
+  assert.ok(pkg.keywords.includes('signalk-node-server-plugin'))
   assert.ok(pkg.files.includes('public'), 'the page must be in the published files')
   assert.ok(fs.existsSync(path.join(__dirname, '../public/index.html')))
 })
@@ -432,4 +433,20 @@ test('unpair stops the loop and forgets the credential', async () => {
   assert.equal(runtime.snapshot().pairing_status, 'unpaired')
   assert.equal(runtime.snapshot().state, 'stopped')
   assert.equal(runtime.snapshot().boat_id, '')
+})
+
+test('jsonBody uses a body the host already parsed instead of waiting on a drained stream', async () => {
+  /* signalk-server runs body-parser before plugin routers. The request stream is
+     then already consumed, 'end' never fires again, and waiting for it hung
+     every POST to this plugin on a real server. */
+  const { jsonBody } = require('../lib/routes')
+  const req = { method: 'POST', _body: true, body: { url: 'https://yey.boats/c/x' },
+    on: () => { throw new Error('must not read the stream') }, setEncoding: () => {} }
+  await new Promise((resolve) => jsonBody()(req, res(), resolve))
+  assert.deepEqual(req.body, { url: 'https://yey.boats/c/x' })
+
+  const drained = { method: 'POST', readableEnded: true,
+    on: () => { throw new Error('must not read the stream') }, setEncoding: () => {} }
+  await new Promise((resolve) => jsonBody()(drained, res(), resolve))
+  assert.deepEqual(drained.body, {})
 })

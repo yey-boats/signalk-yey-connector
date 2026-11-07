@@ -39,53 +39,44 @@ module.exports = function signalkYeyConnectorPlugin (app) {
       'outbound-only connection. No inbound ports. The plan is managed on the web ' +
       'and shown here read-only.',
 
+    // The admin UI shows the configurator panel (public/remoteEntry.js,
+    // keyword `signalk-plugin-configurator`) instead of a form generated from
+    // this schema; the schema still describes the options file, and is the form
+    // an older admin UI falls back to. Routing, boat id and credential are NOT
+    // here: they live in the connector's private state file (lib/state.js).
     schema: () => ({
       type: 'object',
       title: 'yey — cloud connector',
       description:
-        'Not connected yet? Open ' +
-        'https://yey.boats/setup?source=plugin — it walks through pairing, what ' +
-        'leaves the boat, and the price. Self-hosting is a direction we intend to ' +
-        'offer; there is no date.',
+        'Get a connection link on yey.boats (Account → Connect a SignalK server), ' +
+        'paste it here and confirm your boat.',
       properties: {
-        enabled: {
-          type: 'boolean', title: 'Send data to yey', default: true
-        },
-        cloudOrigin: {
-          type: 'string', title: 'yey origin', default: 'https://yey.boats'
-        },
-        tenant: { type: 'string', title: 'Tenant', default: 'home' },
-        project: { type: 'string', title: 'Project', default: 'demo' },
-        bundleId: {
-          type: 'string', title: 'Bundle id', default: 'signalk@2026-06-05'
-        },
-        signalkUrl: {
+        connectionUrl: {
           type: 'string',
-          title: 'SignalK REST/WS base URL',
-          description: 'This server, as this plugin should reach it.',
-          default: 'http://localhost:3000'
-        },
-        signalkToken: {
-          type: 'string',
-          title: 'SignalK access token (only if security is enabled)',
+          title: 'Connection URL',
+          description: 'From yey.boats, for example https://yey.boats/c/ABC-DEF-GHJ',
           default: ''
         },
-        boatId: {
-          type: 'string', title: 'Boat id (filled in by pairing)', default: ''
-        },
-        boatCredential: {
+        key: {
           type: 'string',
-          title: 'Boat credential (filled in by pairing — keep it secret)',
+          title: 'Key (only if yey.boats gave you one)',
+          description: 'Used once to connect, then removed from these settings.',
           default: ''
         },
-        deny: {
-          type: 'array',
-          title: 'Never send these paths (this list always wins over the plan)',
-          items: { type: 'string' },
-          default: []
-        },
-        bufferMegabytes: {
-          type: 'number', title: 'Offline buffer size (MB)', default: 50
+        advanced: {
+          type: 'object',
+          title: 'Advanced',
+          properties: {
+            deny: {
+              type: 'array',
+              title: 'Never send these paths (this list always wins over the plan)',
+              items: { type: 'string' },
+              default: []
+            },
+            bufferMegabytes: {
+              type: 'number', title: 'Offline buffer size (MB)', default: 50
+            }
+          }
         }
       }
     }),
@@ -109,12 +100,10 @@ module.exports = function signalkYeyConnectorPlugin (app) {
 
     statusMessage: () => (runtime ? runtime.statusMessage() : 'stopped'),
 
-    // Routes are served under /plugins/signalk-yey-connector/… — including
-    // GET /, which serves public/index.html. That page is where both pairing
-    // buttons live and it is the URL statusMessage() tells an unpaired owner to
-    // open, so the route and that string ship together. The same file is also
-    // mounted at /signalk-yey-connector/ by the SignalK server, because
-    // package.json carries the `signalk-webapp` keyword.
+    // Routes are served under /plugins/signalk-yey-connector/…: the
+    // connect-by-URL calls the Plugin Config panel makes (connect/resolve,
+    // connect/confirm, connect/key, status, disconnect), the older pairing
+    // calls, and GET / (public/index.html, kept for now, no longer advertised).
     registerWithRouter: (router) => {
       router.use(jsonBody())
       registerRoutes(router, () => runtime)

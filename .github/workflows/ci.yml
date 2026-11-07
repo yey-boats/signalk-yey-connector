@@ -28,6 +28,11 @@ jobs:
       - name: Syntax check
         run: npm run check
 
+      # public/ (the Plugin Config panel) is committed because nothing is built
+      # on the boat. Rebuild it and fail if the committed copy is stale.
+      - name: Panel bundle is up to date
+        run: npm run build:config && git status --porcelain -- public && test -z "$(git status --porcelain -- public)"
+
       - name: Unit tests
         run: npm test
 
