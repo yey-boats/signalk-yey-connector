@@ -18,21 +18,43 @@
   table { border-collapse: collapse; width: 100%; font-size: .9rem; }
   td, th { text-align: left; padding: .2rem .5rem; border-bottom: 1px solid; }
   footer { margin-top: 2rem; font-size: .85rem; opacity: .7; }
+  h1 a { color: inherit; text-decoration: none; }
+  ol.steps { padding-left: 1.25rem; }
+  ol.steps li { margin: .4rem 0; }
 </style>
 </head>
 <body>
-<h1>yey — cloud connector</h1>
-<p class="muted">Outbound only. No inbound ports, nothing to forward.</p>
+<h1><a href="https://yey.boats/?source=plugin" target="_blank" rel="noopener noreferrer">yey</a> — cloud connector</h1>
+<p class="muted">Connects this boat to <a href="https://yey.boats/?source=plugin" target="_blank" rel="noopener noreferrer">yey.boats</a>.
+Outbound only: no inbound ports, nothing to forward.</p>
+
+<div id="login" class="card" hidden>
+  <h2>Sign in to SignalK first</h2>
+  <p>Connecting a boat changes this server's settings, so SignalK needs you signed in as an
+  administrator.</p>
+  <p><a id="login-link" href="/admin/#/login">Sign in to the SignalK admin</a>, then come back to
+  this page.</p>
+</div>
+
+<p id="load-error" class="card" role="alert" hidden></p>
 
 <div id="notconnected" hidden>
   <div class="card">
     <h2>Connect this boat</h2>
+    <ol class="steps">
+      <li>Press <strong>Connect to yey</strong>. A link appears.</li>
+      <li>Open the link (on your phone is fine), sign in to yey.boats with Google or Telegram,
+        and confirm this boat.</li>
+      <li>Come back here: this page switches to <strong>connected</strong> on its own.</li>
+    </ol>
+    <p class="muted">Already added the boat on yey.boats or with <code>/linkboat</code> in the
+    Telegram bot? Type the code it gave you instead.</p>
     <p class="row">
       <button id="btn-claim">Connect to yey</button>
       <span id="claim-hint" class="muted"></span>
     </p>
     <p class="row">
-      <input id="code" placeholder="or enter a code: ABC-DEF-GHJ" size="18" autocomplete="off" spellcheck="false">
+      <input id="code" placeholder="or enter a code: ABC-DEF-GHJ" size="28" autocomplete="off" spellcheck="false">
       <button id="btn-code">Pair with code</button>
     </p>
     <p id="claim-resume" class="muted" hidden>A connection request is still waiting for you to
@@ -53,8 +75,9 @@
   <a href="https://yey.boats/pricing?source=plugin" target="_blank" rel="noopener noreferrer">Pricing</a></p>
 
   <h2>Privacy</h2>
-  <p>Only the paths in your consent list ever leave this boat, and the deny list in the
-  settings above always wins over anything the cloud asks for.
+  <p>Only the values in your consent list leave this boat, and the deny list in the plugin
+  settings always wins over anything the cloud asks for. When it connects, the connector also
+  sends the boat's name and MMSI and a list of what this server has (path names, no values).
   <a href="https://yey.boats/privacy?source=plugin" target="_blank" rel="noopener noreferrer">What leaves the boat</a></p>
 
   <h2>Self-hosting</h2>
@@ -87,15 +110,45 @@
   revoke the boat on the yey side as well, use <code>/unpair</code> in the yey chat.</p>
 </div>
 
-<footer><a href="https://kdcube.tech/" target="_blank" rel="noopener noreferrer">Powered by KDCube</a></footer>
+<footer>
+  <a href="https://yey.boats/?source=plugin" target="_blank" rel="noopener noreferrer">yey.boats</a>
+  · Powered by <a href="https://kdcube.tech/" target="_blank" rel="noopener noreferrer">KDCube</a>
+</footer>
 
 <script>
 const BASE = '/plugins/signalk-yey-connector'
 const $ = (id) => document.getElementById(id)
 
+// SignalK answers 401 to plugin routes until an administrator signs in. Say so
+// instead of failing silently: unguarded, res.json() threw on the 401 and the
+// page stayed blank except for its footer.
+function needLogin (res) {
+  if (res.status !== 401 && res.status !== 403) return false
+  $('notconnected').hidden = true
+  $('connected').hidden = true
+  $('login').hidden = false
+  return true
+}
+
+async function api (path, init) {
+  const res = await fetch(`${BASE}${path}`, init)
+  if (needLogin(res)) return null
+  $('login').hidden = true
+  let body = null
+  try { body = await res.json() } catch { body = null }
+  if (!res.ok || body === null) {
+    $('load-error').textContent = `The connector did not answer (${res.status}). Check that the ` +
+      'plugin is enabled under Server → Plugin Config, then reload this page.'
+    $('load-error').hidden = false
+    return null
+  }
+  $('load-error').hidden = true
+  return body
+}
+
 async function refresh () {
-  const res = await fetch(`${BASE}/status`)
-  const s = await res.json()
+  const s = await api('/status')
+  if (!s) return
   const paired = Boolean(s.boat_id)
   $('notconnected').hidden = paired
   $('connected').hidden = !paired
@@ -105,8 +158,8 @@ async function refresh () {
   const awaiting = !paired && s.pairing_status === 'awaiting_confirmation'
   $('claim-resume').hidden = !awaiting
   if (awaiting) {
-    const p = await (await fetch(`${BASE}/pair/poll`)).json()
-    if (p.status === 'confirmed') return refresh()
+    const p = await api('/pair/poll')
+    if (p && p.status === 'confirmed') return refresh()
   }
   if (!paired) return
   $('s-boat').textContent = s.boat_id
@@ -125,9 +178,8 @@ async function refresh () {
 }
 
 $('btn-claim').onclick = async () => {
-  const res = await fetch(`${BASE}/pair/claim`, { method: 'POST' })
-  const out = await res.json()
-  if (out.confirm_url) {
+  const out = await api('/pair/claim', { method: 'POST' })
+  if (out && out.confirm_url) {
     const link = document.createElement('a')
     link.href = out.confirm_url
     link.target = '_blank'
@@ -137,24 +189,29 @@ $('btn-claim').onclick = async () => {
       document.createTextNode('Open '), link,
       document.createTextNode(' on your phone and confirm. This page will pick it up.'))
     const poll = setInterval(async () => {
-      const p = await (await fetch(`${BASE}/pair/poll`)).json()
-      if (p.status === 'confirmed') { clearInterval(poll); refresh() }
+      const p = await api('/pair/poll')
+      if (p && p.status === 'confirmed') { clearInterval(poll); refresh() }
     }, 3000)
   }
 }
 
 $('btn-code').onclick = async () => {
-  const res = await fetch(`${BASE}/pair/code`, {
+  const out = await api('/pair/code', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ code: $('code').value })
   })
-  const out = await res.json()
-  if (out.error) { $('pair-error').textContent = out.error.code; return }
+  if (!out) return
+  if (out.error) {
+    $('pair-error').textContent = out.error.code === 'invalid_code'
+      ? 'That code does not look right. Codes look like ABC-DEF-GHJ.'
+      : out.error.message || out.error.code
+    return
+  }
   refresh()
 }
 
 $('btn-unpair').onclick = async () => {
-  await fetch(`${BASE}/unpair`, { method: 'POST' })
+  await api('/unpair', { method: 'POST' })
   refresh()
 }
 
