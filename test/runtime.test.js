@@ -436,3 +436,37 @@ test('snapshot carries what the connected screen renders', async () => {
     assert.ok(key in s, `snapshot is missing ${key}`)
   }
 })
+
+test('a path that appears after discovery triggers re-discovery and a re-plan', async () => {
+  const h = harness({ replies: [
+    { kind: 'plan', plan: planV(1, []), etag: 'e0' },
+    { kind: 'plan', plan: planV(2, [POSITION]), etag: 'e1' }
+  ] })
+  let tree = { design: { length: { value: { overall: 11.6 } } } }
+  h.runtime.__setSource({ ...SOURCE_STUB, selfTree: async () => tree, collectMeta: async () => ({}) })
+  h.runtime.setConsent(CONSENT)
+  await h.runtime.handshake()
+  await h.runtime.discover()
+  assert.equal(h.requests.length, 1)
+
+  // The instruments come up: position appears in SignalK.
+  tree = { ...tree, navigation: { position: { value: { latitude: -17.5, longitude: -149.6 } } } }
+  h.runtime.onSample({ path: 'navigation.position', value: { latitude: -17.5, longitude: -149.6 },
+                       timestamp: '2026-11-07T20:00:00Z' })
+  await h.runtime.tick()
+  assert.equal(h.requests.length, 1, 'rate-limited: not within a minute of the last discovery')
+
+  h.advance(61_000)
+  await h.runtime.tick()
+  const catalogs = h.published.filter((p) => p.subject === 'yey.boat.catalog')
+  assert.equal(catalogs.length, 2)
+  assert.deepEqual(catalogs[1].payload.diff.added, ['navigation.position'])
+  assert.equal(h.requests.length, 2, 'new paths -> hello again so the cloud re-plans')
+
+  // Known paths do not keep re-discovering.
+  h.runtime.onSample({ path: 'navigation.position', value: { latitude: -17.5, longitude: -149.6 },
+                       timestamp: '2026-11-07T20:00:10Z' })
+  h.advance(61_000)
+  await h.runtime.tick()
+  assert.equal(h.published.filter((p) => p.subject === 'yey.boat.catalog').length, 2)
+})
