@@ -6,18 +6,24 @@ cd "${SIGNALK_NODE_CONFIG_DIR:-/home/node/.signalk}"
 [ -f settings.json ] || cp /bench/settings.json settings.json
 [ -f package.json ] || printf '{"name":"signalk-bench","private":true,"dependencies":{}}\n' > package.json
 
-# First boot only, what an owner would set in the admin UI:
-# - read-only access, so the connector can read over REST. ADMINUSER (which the
-#   simulator needs, it logs in to write) makes the security config immutable
-#   through the API, but allow_readonly is still read from security.json.
-# - the connector enabled. Written once, so a paired boat keeps its credential.
-[ -f security.json ] || printf '{"allow_readonly": true}\n' > security.json
+# First boot only, what an owner would do in the admin UI: switch the connector
+# on. Written once, so a connected boat stays connected across restarts. No
+# read-only access is needed: the connector reads SignalK in-process.
 mkdir -p plugin-config-data
 [ -f plugin-config-data/signalk-yey-connector.json ] || printf '%s\n' \
-  '{"enabled": true, "enableLogging": false, "configuration": {"signalkUrl": "http://localhost:3000"}}' \
+  '{"enabled": true, "enableLogging": false, "configuration": {"connectionUrl": ""}}' \
   > plugin-config-data/signalk-yey-connector.json
 
 src="${CONNECTOR_SRC:-release}"
+
+# Release 0.1.0 still reads SignalK over REST and needs read-only access.
+# ADMINUSER (which the simulator needs, it logs in to write) makes the security
+# config immutable through the API, but allow_readonly is still read from
+# security.json. Later releases read in-process and need none of this.
+if [ "$src" = release ] && [ "${CONNECTOR_VERSION:-0.1.0}" = 0.1.0 ]; then
+  [ -f security.json ] || printf '{"allow_readonly": true}\n' > security.json
+fi
+
 case "$src" in
   release)
     v="${CONNECTOR_VERSION:-0.1.0}"

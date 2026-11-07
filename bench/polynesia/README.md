@@ -17,7 +17,7 @@ docker compose -f bench/polynesia/docker-compose.yml up -d
 | What | Where |
 |---|---|
 | SignalK admin (user `admin`, password `admin`) | http://localhost:3100/admin |
-| yey connector page | http://localhost:3100/signalk-yey-connector/ |
+| yey connector panel | http://localhost:3100/admin/#/serverConfiguration/plugins/signalk-yey-connector |
 | Simulator admin UI | http://localhost:18090 |
 
 The first start downloads the connector from the GitHub release and installs it;
@@ -25,12 +25,18 @@ later starts reuse it.
 
 ## Test the connect flow
 
-1. Open the connector page and press **Connect to yey**. It shows a link and a QR
-   code; open it, sign in to yey.boats and confirm the boat. The page finishes
-   pairing on its own.
-2. Or create the boat on yey.boats (or `/linkboat` in the Telegram bot) and type
-   the code (`ABC-DEF-GHJ`) into the connector page.
+With a connector that has the connection panel (`CONNECTOR_SRC=local`, or a release
+after 0.1.0):
+
+1. On yey.boats, Account → Connect a SignalK server, copy the link.
+2. Open the connector panel above, paste the link, press **Connect**, check the boat
+   details and press **Confirm**. (The simulator publishes no name, MMSI or
+   dimensions; set them in SignalK under Server → Settings → Vessel first if you want
+   them filled in.)
 3. Ask the navigator "where is my boat?". It should answer near Tahiti.
+
+Release 0.1.0 still uses its own page at http://localhost:3100/signalk-yey-connector/
+(*Connect to yey*, or a pairing code `ABC-DEF-GHJ`).
 
 Pairing creates a real boat on yey.boats under the account you confirm with.
 Remove it afterwards with `/unpair <name>` in Telegram if you do not want to keep it.
@@ -57,7 +63,11 @@ docker compose -f bench/polynesia/docker-compose.yml down -v   # stop and forget
 
 ## Notes
 
-- Security is on (the simulator logs in to write), with read-only access allowed so
-  the connector can read over REST, the way the navigator's own boats run.
+- Security is on (the simulator logs in to write). The connector reads SignalK
+  in-process and needs no token or read-only access; only release 0.1.0, which reads
+  over REST, gets `allow_readonly` (written on first boot when `CONNECTOR_SRC=release`
+  and `CONNECTOR_VERSION=0.1.0`).
+- Restarting only the SignalK container invalidates the simulator's login; restart
+  `boat-sim` too.
 - The simulator's day/night, temperature and battery cycles are tied to Adriatic time
   (UTC+2), so in Polynesia (UTC-10) its "day" runs half a day out of phase with the sun.
