@@ -39,19 +39,20 @@ that than promise one.
 
 ## Install
 
-Not on the SignalK Appstore yet, and not published to npm — `private: true` in
-`package.json` makes `npm publish` fail loudly until the licence is settled (see
-`LICENSE.md`). Install from a checkout:
+Not in the SignalK Appstore yet. Install straight from this repository, pinned to a
+release, in the SignalK server's data directory:
 
 ```bash
-cd ~/.signalk/node_modules            # or wherever your server keeps plugins
-git clone https://github.com/yey-boats/signalk-yey-connector
-cd signalk-yey-connector && npm install --omit=dev
+cd ~/.signalk
+# from a release tarball (no git needed on the boat):
+npm install https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.1.0/signalk-yey-connector-0.1.0.tgz
+# or straight from the tagged source (needs git):
+npm install github:yey-boats/signalk-yey-connector#v0.1.0
 ```
 
 Restart the server. The plugin appears under **Server → Plugin Config** as
 "yey — cloud connector", and its page under **Webapps** at
-`/signalk-yey-connector/`.
+`/signalk-yey-connector/`. To update, run the same command with the newer tag.
 
 ## Pairing
 
@@ -97,7 +98,9 @@ transport, so the plan engine can be tested with no boat, no socket and no cloud
 
 ## Licence
 
-Not settled yet — see `LICENSE.md`. The package is not published.
+Apache License 2.0, the same licence as the SignalK server. See `LICENSE` and
+`NOTICE`. The licence covers this plugin only: it grants no rights to the yey.boats
+service, which has its own terms, or to the yey names and logos.
 
 ---
 
