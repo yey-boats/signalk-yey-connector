@@ -50,20 +50,22 @@ that than promise one.
 
 ## Install
 
-Not in the SignalK Appstore yet. Install straight from this repository, pinned to a
-release, in the SignalK server's data directory:
+Not in the SignalK Appstore yet. Install the release in the SignalK server's data
+directory. npm 12 (shipped with current SignalK images) refuses to install from a
+URL by default, so download the file first:
 
 ```bash
 cd ~/.signalk
-# from a release tarball (no git needed on the boat):
-npm install https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.1.0/signalk-yey-connector-0.1.0.tgz
-# or straight from the tagged source (needs git):
-npm install github:yey-boats/signalk-yey-connector#v0.1.0
+curl -LO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.1.0/signalk-yey-connector-0.1.0.tgz
+npm install ./signalk-yey-connector-0.1.0.tgz
 ```
 
 Restart the server. The plugin appears under **Server → Plugin Config** as
 "yey — cloud connector", and its page under **Webapps** at
-`/signalk-yey-connector/`. To update, run the same command with the newer tag.
+`/signalk-yey-connector/`. To update, do the same with the newer release.
+
+To try it without a boat, see `bench/polynesia/`: a SignalK server and the yey
+simulator sailing near Tahiti, in Docker.
 
 ## Pairing
 

@@ -1,0 +1,70 @@
+# Polynesia test bench: a SignalK server with the yey connector installed, fed
+# by the yey boat simulator sailing between Tahiti and Moorea. For testing the
+# connector's pairing ("Connect to yey" / pairing code) and uplink against
+# yey.boats, far from the Adriatic demo boat so the two are never confused.
+#
+#   docker compose -f bench/polynesia/docker-compose.yml up -d
+#   open http://localhost:3100  (SignalK admin: admin / admin)
+#
+# See README.md in this directory.
+name: yey-bench-polynesia
+
+x-signalk-env: &signalk-env
+  HOME: /home/node
+  SIGNALK_NODE_CONFIG_DIR: /home/node/.signalk
+
+services:
+  signalk-server:
+    image: signalk/signalk-server:latest
+    environment:
+      <<: *signalk-env
+      # The simulator logs in before it publishes, so the server needs a user.
+      ADMINUSER: admin:admin
+      # release (default) | local (this checkout) | any npm spec or tarball URL
+      CONNECTOR_SRC: ${CONNECTOR_SRC:-release}
+      CONNECTOR_VERSION: ${CONNECTOR_VERSION:-0.1.0}
+    entrypoint: ["tini", "-s", "--", "sh", "/bench/start-signalk.sh"]
+    volumes:
+      - signalk-data:/home/node/.signalk
+      - ./start-signalk.sh:/bench/start-signalk.sh:ro
+      - ./settings.json:/bench/settings.json:ro
+      - ../..:/connector:ro
+    ports:
+      - "${SIGNALK_PORT:-3100}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/signalk',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  boat-sim:
+    image: ghcr.io/yey-boats/simulator:latest
+    environment:
+      SIGNALK_HOST: signalk-server
+      SIGNALK_PORT: "3000"
+      SIGNALK_USERNAME: admin
+      SIGNALK_PASSWORD: admin
+      SINK: signalk
+      DATA_DIR: /data
+      PYTHONUNBUFFERED: "1"
+      # Open water in the Sea of the Moon, between Tahiti and Moorea.
+      START_LAT: ${START_LAT:--17.55}
+      START_LON: ${START_LON:--149.65}
+      # Keep sailing: lay a fresh routed passage each time one is reached.
+      RANDOM_PASSAGES: "1"
+      PASSAGE_MIN_NM: ${PASSAGE_MIN_NM:-8}
+      PASSAGE_MAX_NM: ${PASSAGE_MAX_NM:-15}
+      SIM_WEB_HOST: 0.0.0.0
+      SIM_WEB_PORT: "8080"
+    volumes:
+      - sim-data:/data
+    ports:
+      - "${SIM_WEB_PORT:-18090}:8080"
+    depends_on:
+      signalk-server:
+        condition: service_healthy
+
+volumes:
+  signalk-data:
+  sim-data:

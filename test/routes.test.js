@@ -265,11 +265,27 @@ test('the page is honest, short, and carries the required links', () => {
   assert.match(html, /yey\.boats\/setup\?source=plugin/)
   assert.match(html, /yey\.boats\/pricing\?source=plugin/)
   assert.match(html, /yey\.boats\/privacy\?source=plugin/)
-  // CLAUDE.md: every web surface in this project carries the attribution, and
-  // the whole phrase is the anchor text so it survives a text-only read.
-  assert.match(html, /kdcube\.tech/)
-  assert.match(html, /Powered by KDCube/)
-  assert.match(html, /<a href="https:\/\/kdcube\.tech\/"[^>]*>Powered by KDCube<\/a>/)
+  // The page belongs to yey.boats: the heading and the footer link there.
+  assert.match(html, /<h1><a href="https:\/\/yey\.boats\/\?source=plugin"/)
+  assert.match(html, /<footer>[\s\S]*yey\.boats[\s\S]*<\/footer>/)
+  // Branding rule (navigator CLAUDE.md): "Powered by KDCube", where KDCube is
+  // a link to https://kdcube.tech/.
+  assert.match(html, /Powered by <a href="https:\/\/kdcube\.tech\/"[^>]*>KDCube<\/a>/)
+})
+
+test('a signed-out visitor is told to sign in, not shown a blank page', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8')
+  assert.match(html, /id="login"/)
+  assert.match(html, /href="\/admin\/#\/login"/)
+  assert.match(html, /res\.status !== 401 && res\.status !== 403/)
+  assert.ok(!/await res\.json\(\)\s*\n\s*const paired/.test(html), 'status must not parse an unchecked response')
+})
+
+test('the page explains the connect steps', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8')
+  assert.match(html, /<ol class="steps">/)
+  assert.match(html, /Connect to yey/)
+  assert.match(html, /\/linkboat/)
 })
 
 test('every outbound link opens in a new tab', () => {
