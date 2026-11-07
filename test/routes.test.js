@@ -157,6 +157,22 @@ test('consent_incomplete is a 400; consent status is projected on /status', asyn
   assert.ok(PUBLIC_KEYS.includes('consent_record'))
 })
 
+test('/status carries the RPC counters, on_request and the AIS relay state', async () => {
+  const r = fakeRouter()
+  registerRoutes(r, () => runtimeStub({
+    snapshot: {
+      rpc: { served: 2, refused: 1 },
+      on_request: ['notifications'],
+      ais: { relaying: false, targets: 0 }
+    }
+  }))
+  const out = res()
+  await r.routes['GET /status']({}, out)
+  assert.deepEqual(out.body.rpc, { served: 2, refused: 1 })
+  assert.deepEqual(out.body.on_request, ['notifications'])
+  assert.deepEqual(out.body.ais, { relaying: false, targets: 0 })
+})
+
 test('GET /status returns the snapshot', async () => {
   const r = fakeRouter()
   registerRoutes(r, () => runtimeStub())
