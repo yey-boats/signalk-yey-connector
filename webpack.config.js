@@ -49,8 +49,8 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, 'public'),
     publicPath: 'auto',
-    // Keep public/index.html (the old page, still served at the plugin route).
-    clean: false
+    // public/ holds only this build's output (the old standalone page is gone).
+    clean: true
   },
   optimization: {
     // Stable chunk names, so a rebuild with no source change is a no-op diff.

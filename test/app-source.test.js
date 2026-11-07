@@ -88,7 +88,7 @@ test('subscribe goes through subscriptionmanager and flattens deltas to samples'
     meta: [{ path: 'x', value: {} }]
   }] })
   assert.deepEqual(samples, [{ path: 'navigation.speedOverGround', value: 3.3,
-    timestamp: '2026-11-07T10:00:00Z', source: 'sim' }])
+    timestamp: '2026-11-07T10:00:00Z', source: 'sim', context: 'vessels.self' }])
   sub.close()
   assert.equal(app.subscribers.length, 0, 'close() runs the unsubscribes')
 })

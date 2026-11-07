@@ -19,10 +19,21 @@ on the boat. The plugin reads SignalK in-process, so there is no SignalK token t
 
 - **Values, only for the SignalK paths your plan selects**, at the rate the plan sets.
   The default consent is position, speed and course over ground, heading, apparent wind,
-  depth and notifications. The plan can never exceed the consent you gave when you paired.
+  depth and notifications. The plan can never exceed the consent you gave in the panel.
+- **Nothing is sent before you approve it, here on the boat.** When you connect, the panel
+  shows what will be sent, what is never sent (your deny list), what yey.boats keeps and for
+  how long, and links to the privacy policy and the terms, with three separate boxes, all
+  unticked: approve the data plan, agree to the terms (at the version shown), and confirm you
+  have read the privacy policy. yey.boats records the acceptance (no IP address).
 - **When you connect, the boat details you confirm:** name, MMSI, call sign, type,
   length, beam and draft, read from this server and corrected by you. They become the
   boat's record on yey.boats.
+- **AIS traffic around the boat, only if you consented to `ais`.** Off by default. When
+  your consent includes the item `ais` (on yey.boats: Account → your boat → "Share AIS
+  traffic seen by this boat"), the connector also forwards the other vessels this server
+  sees on AIS: each target's MMSI, name, position, course, speed and ship type, at most
+  every 30 seconds per target and only when it changed. Your own boat is never in it.
+  Put `ais` in the deny list to keep it on the boat whatever the plan says.
 - **The deny list in the plugin settings always wins.** A path you deny is dropped on
   the boat, before anything is sent, no matter what the cloud asks for.
 - **A hello when the connector connects:** the connector and SignalK versions, the
@@ -33,6 +44,12 @@ on the boat. The plugin reads SignalK in-process, so there is no SignalK token t
   `vessels/self` path (up to 250), and the gear manufacturer and model from SignalK `meta`.
   This lists paths, not their values, and it is sent whatever the plan selects, so the web
   page can show what you could turn on.
+- **Answers to questions yey.boats asks, one value at a time.** Over the same outbound
+  connection the cloud may ask for the current value, metadata or (if this server has a
+  history provider) the history of a single path, when the navigator needs it to answer
+  you. The boat answers only paths inside your consent that the plan either sends or marks
+  *on request*, never a denied path, never a write or control (those are refused), at most
+  30 a minute, each answer capped at 64 KB.
 - Values that could not be sent during an outage are buffered on the boat (50 MB by
   default) and replayed when the link comes back. The same consent and deny rules apply
   to the replay.
@@ -61,8 +78,8 @@ URL by default, so download the file first:
 
 ```bash
 cd ~/.signalk
-curl -LO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.1.0/signalk-yey-connector-0.1.0.tgz
-npm install ./signalk-yey-connector-0.1.0.tgz
+curl -LO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.2.0/signalk-yey-connector-0.2.0.tgz
+npm install ./signalk-yey-connector-0.2.0.tgz
 ```
 
 Restart the server. The plugin appears under **Server → Plugin Config** as
@@ -81,23 +98,34 @@ simulator sailing near Tahiti, in Docker.
    into **Connection URL** and press **Connect**. (If the plugin is switched off,
    Connect switches it on.)
 3. **Is this your boat?** The panel shows the name, MMSI, call sign, type, length, beam
-   and draft this server knows. Correct anything that is wrong and press **Confirm**.
-4. The panel says **Connected to yey.boats as *name***, with when data was last sent and
+   and draft this server knows. Correct anything that is wrong and press **Next**.
+4. **What this server will share.** Read the summary, tick the three boxes and press
+   **Agree and connect**. Nothing is paired or sent until you do. While the terms on
+   yey.boats are a draft, your acceptance is recorded as a draft acceptance and you will be
+   asked again, with time to do so, when the final terms are published.
+5. The panel says **Connected to yey.boats as *name***, with when data was last sent and
    the plan version. **Disconnect** forgets the connection on this server (it does not
    delete the boat on yey.boats).
 
 **With a key.** For scripted or provisioned installs yey.boats can issue a key for one
-boat (`yk1.…`). Paste the link yey.boats gives with it (`https://yey.boats/c/key`) and
-the key into **Key**, and press **Connect**: there is no confirm step. A key can also be
-put in the settings file (`connectionUrl` and `key`); the plugin connects with it on
-start and then removes the key from the file.
+boat (`yk1.…`); you accept the same summary on yey.boats when you issue it. Paste the
+link yey.boats gives with it (`https://yey.boats/c/key`) and the key into **Key**, and
+press **Connect**: there is no boat confirm step, but the panel still shows what will be
+shared and asks for the three boxes before the key is used. A key can also be put in the
+settings file (`connectionUrl` and `key`); the plugin connects with it on start (relying
+on the acceptance you gave when the key was issued) and then removes the key from the
+file.
+
+**Connected before consent existed?** The plugin keeps sending, and the panel shows
+**Review and approve**. If yey.boats ever pauses a boat for want of approval, the panel says
+so, the plugin stops gathering, and approving there resumes it.
 
 **Self-hosted or a yey box:** the link is simply local (`http://yey.local/c/…`).
 Nothing else differs.
 
 Routing, the boat id and the credential are kept in the plugin's private state file,
-never in its settings. Connecting from the older plugin page (*Connect to yey* / pairing
-code at `/plugins/signalk-yey-connector/`) still works for now.
+never in its settings. The older standalone page at `/plugins/signalk-yey-connector/`
+and its pairing-code calls are gone: the panel is the one way to connect.
 
 ## Settings
 

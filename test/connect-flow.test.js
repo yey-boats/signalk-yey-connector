@@ -7,7 +7,8 @@ const os = require('node:os')
 
 const { createRuntime } = require('../lib/runtime')
 const { registerRoutes } = require('../lib/routes')
-const { DOC, KEY_DOC, TREE, docFetch } = require('./fixtures/connection-doc')
+const { DOC, KEY_DOC, TREE, docFetch, CONSENT, CONSENT_URL, DOC_C, KEY_DOC_C, ALL } =
+  require('./fixtures/connection-doc')
 
 const URL_CODE = 'https://yey.boats/c/ABC-DEF-GHJ'
 const URL_KEY = 'https://yey.boats/c/key'
@@ -16,7 +17,8 @@ const URL_GONE = 'https://yey.boats/c/AAA-BBB-CCC'
 /** A runtime with every transport injected: the connection URL fetch
  *  (deps.fetch), the pair call (deps.callPublicOp, which lib/pairing uses) and
  *  the uplink. Pairing and connection parsing are the REAL modules. */
-function harness ({ options = {}, pairReply, tree = TREE, app = {} } = {}) {
+function harness ({ options = {}, pairReply, tree = TREE, app = {}, docs = {}, ops = {},
+  uplinkState } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yey-connect-'))
   const fetchCalls = []
   const pairCalls = []
@@ -25,7 +27,7 @@ function harness ({ options = {}, pairReply, tree = TREE, app = {} } = {}) {
     connect: async () => { connects += 1 },
     close: () => {},
     setOnLost: () => {},
-    state: () => ({ connected: connects > 0 }),
+    state: () => ({ connected: connects > 0, ...(uplinkState ? uplinkState() : {}) }),
     publish: async () => ({ status: 'accepted', accepted: [], rejected: [] }),
     request: async () => ({ kind: 'plan', plan: null, etag: '' })
   }
@@ -38,10 +40,12 @@ function harness ({ options = {}, pairReply, tree = TREE, app = {} } = {}) {
       fetch: docFetch({
         [URL_CODE]: [200, DOC],
         [URL_KEY]: [200, KEY_DOC],
-        [URL_GONE]: [404, { kind: 'yey.connection.v1', error: 'unknown_or_expired_code' }]
+        [URL_GONE]: [404, { kind: 'yey.connection.v1', error: 'unknown_or_expired_code' }],
+        ...docs
       }, fetchCalls),
       callPublicOp: async (cfg, operation, data) => {
         pairCalls.push({ cfg, operation, data })
+        if (ops[operation]) return ops[operation](data, cfg)
         return pairReply || { ok: true, boat_id: 'b_7', boat_credential: 'bk_7secret',
                               display_name: 'Sara', subscribed_paths: ['navigation.position'] }
       },
@@ -58,7 +62,7 @@ function harness ({ options = {}, pairReply, tree = TREE, app = {} } = {}) {
     }
   })
   const stateFile = path.join(dir, 'yey-connector-state.json')
-  return { runtime, dir, stateFile, fetchCalls, pairCalls, connects: () => connects }
+  return { runtime, dir, stateFile, fetchCalls, pairCalls, connects: () => connects, uplink }
 }
 
 test('resolve fetches the document and returns the boat found in SignalK, pairing nothing', async () => {
@@ -326,4 +330,212 @@ test('a key still in the options of a connected install is scrubbed without reco
   })
   assert.equal(again.cfg.boatId, 'b_42')
   assert.deepEqual(saves, [{ connectionUrl: URL_KEY }])
+})
+
+
+// ── Consent on the boat's side (#441 phase 2) ─────────────────────────────────
+
+const URL_CODE_C = 'https://yey.boats/c/CON-SEN-TED'
+const URL_KEY_C = 'https://yey.boats/c/key?v=2'
+const STATUS_OK = { state: 'provisional', allowed: true, enforced: true, reason: 'terms_draft',
+  terms_version: '2026-11-07-draft', terms_draft: true, accepted_at: '2026-11-07T20:00:00Z', reconsent_by: null }
+const consentDocs = { [URL_CODE_C]: [200, DOC_C], [URL_KEY_C]: [200, KEY_DOC_C] }
+
+test('resolve hands the panel the consent summary from the connection document', async () => {
+  const h = harness({ docs: consentDocs })
+  await h.runtime.start()
+  const out = await h.runtime.resolveConnection({ url: URL_CODE_C })
+  assert.equal(out.consent.kind, 'yey.consent.v1')
+  assert.deepEqual(out.consent.send.map((f) => f.path),
+    ['navigation.position', 'environment.depth.belowTransducer'])
+  assert.equal(out.consent.terms.draft, true)
+})
+
+test('confirm without all three items ticked pairs nothing and sends nothing', async () => {
+  const h = harness({ docs: consentDocs })
+  await h.runtime.start()
+  await h.runtime.resolveConnection({ url: URL_CODE_C })
+  for (const accepted of [undefined, {}, { data_plan: true, terms: true }, { ...ALL, privacy: 'yes' }]) {
+    await assert.rejects(h.runtime.confirmConnection({ identity: {}, consent: { accepted } }),
+      (e) => e.code === 'consent_incomplete')
+  }
+  assert.equal(h.pairCalls.length, 0, 'no pair call, so the one-time code is not spent')
+  assert.equal(h.connects(), 0)
+  assert.ok(!fs.existsSync(h.stateFile) || !JSON.parse(fs.readFileSync(h.stateFile, 'utf8')).boat_id)
+})
+
+test('confirm with consent pairs once, carrying identity and the acceptance, then goes live', async () => {
+  const h = harness({
+    docs: consentDocs,
+    options: { advanced: { deny: ['navigation.anchor'] } },
+    pairReply: { ok: true, boat_id: 'b_7', boat_credential: 'bk_7secret', display_name: 'Sara',
+      subscribed_paths: ['navigation.position', 'environment.depth.belowTransducer', 'notifications'],
+      consent: STATUS_OK }
+  })
+  await h.runtime.start()
+  await h.runtime.resolveConnection({ url: URL_CODE_C })
+  const out = await h.runtime.confirmConnection({ identity: { name: 'Sara' }, consent: { accepted: ALL } })
+  assert.equal(out.status, 'connected')
+  assert.equal(h.pairCalls.length, 1)
+  const sent = h.pairCalls[0].data.consent
+  assert.deepEqual(sent, {
+    kind: 'yey.consent.v1',
+    accepted: ALL,
+    summary_hash: CONSENT.summary_hash,
+    terms_version: '2026-11-07-draft',
+    privacy_version: '2026-11-07',
+    deny: ['navigation.anchor'],
+    connector_version: '0.2.0'
+  })
+  assert.equal(h.pairCalls[0].data.identity.name, 'Sara')
+  assert.equal(h.connects(), 1)
+  const snap = h.runtime.snapshot()
+  // The boat-side boundary is what the owner approved, not the wider list the
+  // cloud happens to hold.
+  assert.deepEqual(snap.consent, ['navigation.position', 'environment.depth.belowTransducer'])
+  assert.equal(snap.consent_status.state, 'provisional')
+  assert.equal(snap.consent_record.terms_version, '2026-11-07-draft')
+  assert.equal(snap.consent_record.terms_draft, true)
+  assert.equal(snap.consent_record.via, 'url')
+  const saved = JSON.parse(fs.readFileSync(h.stateFile, 'utf8'))
+  assert.equal(saved.consent_url, CONSENT_URL)
+})
+
+test('consent_stale keeps the fresh summary for the panel and does not connect', async () => {
+  const fresh = { ...CONSENT, summary_hash: 'b'.repeat(64) }
+  let calls = 0
+  const h = harness({
+    docs: consentDocs,
+    ops: {
+      signalk_boat_pair: (data) => {
+        calls += 1
+        return data.consent.summary_hash === fresh.summary_hash
+          ? { ok: true, boat_id: 'b_7', boat_credential: 'bk_7secret', display_name: 'Sara', subscribed_paths: [] }
+          : { ok: false, error: 'consent_stale', consent: fresh }
+      }
+    }
+  })
+  await h.runtime.start()
+  await h.runtime.resolveConnection({ url: URL_CODE_C })
+  await assert.rejects(h.runtime.confirmConnection({ identity: {}, consent: { accepted: ALL } }),
+    (e) => e.code === 'consent_stale' && e.consent.summary_hash === fresh.summary_hash)
+  assert.equal(h.connects(), 0)
+  // Approving again approves the summary as it is now.
+  const out = await h.runtime.confirmConnection({ identity: {}, consent: { accepted: ALL } })
+  assert.equal(out.status, 'connected')
+  assert.equal(calls, 2)
+})
+
+test('a cloud without consent (phase 1) still connects as before', async () => {
+  const h = harness()
+  await h.runtime.start()
+  const out = await h.runtime.resolveConnection({ url: URL_CODE })
+  assert.equal(out.consent, null)
+  await h.runtime.confirmConnection({ identity: {} })
+  assert.equal(h.pairCalls[0].data.consent, undefined)
+  assert.equal(h.connects(), 1)
+})
+
+test('key mode: the boat-side summary is approved before the key is used', async () => {
+  const h = harness({
+    docs: consentDocs,
+    ops: {
+      signalk_boat_consent: (data) => data.consent
+        ? { ok: true, status: STATUS_OK }
+        : { ok: true, consent: CONSENT, status: { state: 'provisional', allowed: true, enforced: true } }
+    }
+  })
+  await h.runtime.start()
+  const first = await h.runtime.connectWithKey({ url: URL_KEY_C, key: 'yk1.b_42.bk_supersecret' })
+  assert.equal(first.status, 'consent')
+  assert.equal(first.consent.summary_hash, CONSENT.summary_hash)
+  assert.equal(h.connects(), 0, 'nothing is sent before the owner approves')
+  assert.equal(h.runtime.snapshot().connection.status, 'consent')
+  assert.equal(JSON.stringify(first).includes('bk_supersecret'), false)
+  const read = h.pairCalls[0]
+  assert.equal(read.operation, 'signalk_boat_consent')
+  assert.equal(read.cfg.opUrls.signalk_boat_consent, CONSENT_URL)
+  assert.deepEqual(read.data, { boat_id: 'b_42', boat_credential: 'bk_supersecret' })
+
+  await assert.rejects(h.runtime.confirmConnection({ consent: { accepted: { data_plan: true } } }),
+    (e) => e.code === 'consent_incomplete')
+  const out = await h.runtime.confirmConnection({ consent: { accepted: ALL } })
+  assert.equal(out.status, 'connected')
+  assert.equal(h.pairCalls[1].data.consent.summary_hash, CONSENT.summary_hash)
+  assert.equal(h.connects(), 1)
+  assert.equal(h.runtime.snapshot().consent_record.via, 'key')
+})
+
+test('a provisioned key (settings file) does not wait for the panel: acceptance was captured at key issue', async () => {
+  const h = harness({ docs: consentDocs, options: { connectionUrl: URL_KEY_C, key: 'yk1.b_42.bk_supersecret' } })
+  await h.runtime.start()
+  assert.equal(h.connects(), 1)
+  assert.equal(h.pairCalls.filter((c) => c.operation === 'signalk_boat_consent').length, 0)
+})
+
+test('a boat connected before consent existed: review and approve from the panel', async () => {
+  const h = harness({
+    docs: consentDocs,
+    ops: {
+      signalk_boat_consent: (data) => data.consent
+        ? { ok: true, status: STATUS_OK }
+        : { ok: true, consent: CONSENT, status: { state: 'missing', allowed: true, enforced: false } }
+    },
+    uplinkState: () => ({ consent: { state: 'missing', allowed: true, enforced: false } })
+  })
+  await h.runtime.start()
+  await h.runtime.connectWithKey({ url: URL_KEY, key: 'yk1.b_42.bk_supersecret' })   // phase-1 style, no consent
+  assert.equal(h.connects(), 1)
+  assert.equal(h.runtime.snapshot().consent_status.state, 'missing', 'the token claim said so')
+  const doc = await h.runtime.consentDocument()
+  assert.equal(doc.consent.summary_hash, CONSENT.summary_hash)
+  // No consent_url stored for a phase-1 connection: the op URL is built from the routing.
+  assert.equal(h.pairCalls.at(-1).cfg.opUrls.signalk_boat_consent, undefined)
+  const out = await h.runtime.acceptConsent({ accepted: ALL })
+  assert.equal(out.status, 'approved')
+  assert.equal(h.runtime.snapshot().consent_status.state, 'provisional')
+  assert.equal(h.runtime.snapshot().consent_record.via, 'panel')
+})
+
+test('consent_required at the token claim parks the link; approving dials again', async () => {
+  let refuse = true
+  let dials = 0
+  // The harness only lends its data dir and fake uplink; the runtime below is
+  // built with a recording timer so a redial loop would be visible.
+  const h = harness()
+  h.uplink.connect = async () => {
+    dials += 1
+    if (refuse) throw Object.assign(new Error('consent_required'), { code: 'consent_required' })
+  }
+  const { createRuntime } = require('../lib/runtime')
+  const timers = []
+  const runtime = createRuntime({
+    app: { debug: () => {}, getDataDirPath: () => h.dir },
+    version: '0.2.0',
+    options: {},
+    deps: {
+      createUplink: () => h.uplink,
+      callPublicOp: async (cfg, op, data) => (op === 'signalk_boat_consent'
+        ? (data.consent ? { ok: true, status: STATUS_OK } : { ok: true, consent: CONSENT, status: { state: 'missing', allowed: false, enforced: true } })
+        : { ok: false, error: 'unexpected' }),
+      fetch: docFetch({ [URL_KEY]: [200, KEY_DOC] }),
+      source: { subscribe: () => ({ close () {} }), selfTree: async () => ({}), collectMeta: async () => ({}),
+        serverInfo: async () => ({ version: '2', plugins: [] }), vesselIdentity: async () => ({ name: '', mmsi: '' }) },
+      setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length },
+      clearTimeout: () => {}
+    }
+  })
+  await runtime.start()
+  await runtime.connectWithKey({ url: URL_KEY, key: 'yk1.b_42.bk_supersecret' })
+  assert.equal(dials, 1)
+  const snap = runtime.snapshot()
+  assert.equal(snap.state, 'consent_required')
+  assert.equal(snap.consent_status.allowed, false)
+  assert.equal(timers.length, 0, 'no retry loop while waiting for the owner')
+  refuse = false
+  await runtime.acceptConsent({ accepted: ALL })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(dials, 2, 'approving dials again')
+  assert.notEqual(runtime.snapshot().state, 'consent_required')
+  runtime.stop()
 })

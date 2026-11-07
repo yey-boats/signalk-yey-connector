@@ -12,23 +12,11 @@
 // session cookie the admin UI already holds.
 
 import React, { useState, useEffect, useCallback } from 'react'
+import { describe } from './messages'
 
 const h = React.createElement
 const BASE = '/plugins/signalk-yey-connector'
 const DEFAULT_ORIGIN = 'https://yey.boats'
-
-const MESSAGES = {
-  invalid_url: 'Paste the connection link from yey.boats. It starts with https://',
-  unreachable: 'Could not reach yey.boats from this server. Check its internet connection and try again.',
-  unknown_or_expired_code: 'This link is unknown or has expired. Get a fresh one on yey.boats.',
-  invalid_document: 'This is not a yey.boats connection link.',
-  invalid_key: 'This key is not complete. Copy it again from yey.boats.',
-  key_required: 'This link needs the key yey.boats gave you.',
-  invalid_identity: null, // the server's message says which field
-  already_connected: 'Already connected. Disconnect first.',
-  nothing_to_confirm: 'Paste the connection link again.',
-  plugin_stopped: 'The connector is not running.'
-}
 
 async function call (method, path, body) {
   let res
@@ -40,7 +28,7 @@ async function call (method, path, body) {
       body: body ? JSON.stringify(body) : undefined
     })
   } catch (e) {
-    const err = new Error('The SignalK server did not answer.')
+    const err = new Error(describe('network'))
     err.code = 'network'
     throw err
   }
@@ -48,13 +36,12 @@ async function call (method, path, body) {
   try { data = await res.json() } catch (e) { data = null }
   if (!res.ok) {
     const e = (data && data.error) || {}
-    // A refusal from yey.boats at pairing arrives as a bare code (code_expired, …).
-    const raw = !e.message || e.message === e.code
-    const err = new Error(MESSAGES[e.code] ||
-      (raw && e.code ? 'yey.boats did not accept this (' + e.code + '). Get a fresh link and try again.' : e.message) ||
-      ('HTTP ' + res.status))
-    err.code = e.code || ('http_' + res.status)
+    // A refusal from yey.boats arrives as a bare code (rate_limited, …): say it plainly.
+    const code = e.code || ('http_' + res.status)
+    const err = new Error(describe(code, e.message))
+    err.code = code
     err.status = res.status
+    if (e.consent) err.consent = e.consent   // consent_stale: the summary as it is now
     throw err
   }
   return data || {}
@@ -79,6 +66,68 @@ function field (id, label, input, hint) {
     hint ? h('div', { className: 'form-text' }, hint) : null)
 }
 
+const ITEM_TEXT = {
+  data_plan: 'I approve sending the data listed above to yey.boats.',
+  terms: null,   // built with the link and version
+  privacy: null
+}
+
+// Statuses in which the owner is asked to (re)approve on the boat.
+const NEEDS_APPROVAL = ['missing', 'expired', 'reconsent_due']
+
+/** The boat-side consent step. Three separate boxes, all unticked. */
+function ConsentForm ({ consent, deny, busy, submitLabel, onSubmit, onBack, intro }) {
+  const [ticks, setTicks] = useState({ data_plan: false, terms: false, privacy: false })
+  useEffect(() => { setTicks({ data_plan: false, terms: false, privacy: false }) }, [consent && consent.summary_hash])
+  if (!consent) return null
+  const storage = consent.storage || {}
+  const terms = consent.terms || {}
+  const privacy = consent.privacy || {}
+  const all = ticks.data_plan && ticks.terms && ticks.privacy
+  const link = (href, text) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text)
+  const box = (id, label) => h('div', { className: 'form-check mb-2', key: id },
+    h('input', {
+      id: 'yey-consent-' + id,
+      className: 'form-check-input',
+      type: 'checkbox',
+      checked: ticks[id],
+      onChange: (e) => setTicks({ ...ticks, [id]: e.target.checked })
+    }),
+    h('label', { className: 'form-check-label', htmlFor: 'yey-consent-' + id }, label))
+  const asked = new Set((consent.on_request || []).map((f) => f.path))
+  return h('form', {
+    onSubmit: (ev) => { ev.preventDefault(); onSubmit({ data_plan: ticks.data_plan, terms: ticks.terms, privacy: ticks.privacy }) }
+  },
+  h('h6', null, 'What this server will share'),
+  intro ? h('p', { className: 'small' }, intro) : null,
+  h('p', { className: 'small mb-1' }, h('strong', null, 'Sent to yey.boats'), ' (only these, at the rate your plan sets):'),
+  h('ul', { className: 'small' }, (consent.send || []).map((f) =>
+    h('li', { key: f.path }, f.label ? f.label + ' ' : '', h('code', null, f.path),
+      asked.has(f.path) ? h('span', { className: 'text-muted' }, ' (only when a question needs it)') : null))),
+  h('p', { className: 'small mb-1' }, h('strong', null, 'Never sent'), ' (your Advanced list, which always wins):'),
+  h('p', { className: 'small' }, deny && deny.length ? deny.map((d) => h('code', { key: d, className: 'me-2' }, d)) : 'nothing listed'),
+  h('p', { className: 'small mb-1' }, h('strong', null, 'Also sent when connecting:'),
+    ' the boat details you confirmed, the connector and SignalK versions, and a list of the paths this server has (names and units, no values).'),
+  h('p', { className: 'small mb-1' }, h('strong', null, 'Kept on yey.boats: ')),
+  h('ul', { className: 'small' },
+    storage.latest ? h('li', null, 'Latest value of each field: ' + storage.latest) : null,
+    storage.history_days ? h('li', null, 'History: ' + storage.history_days + ' days') : null,
+    storage.who ? h('li', null, 'Who can see it: ' + storage.who) : null,
+    storage.processors ? h('li', null, storage.processors) : null),
+  terms.draft
+    ? h('div', { className: 'alert alert-warning small py-2' },
+      'The terms are still a draft (version ' + terms.version + '). Your acceptance is recorded as a draft acceptance; ' +
+      'you will be asked again once the final terms are published, with time to do so.')
+    : null,
+  box('data_plan', ITEM_TEXT.data_plan),
+  box('terms', h('span', null, 'I have read and agree to the ', link(terms.url, 'Terms'), ' (version ' + terms.version + ').')),
+  box('privacy', h('span', null, 'I have read the ', link(privacy.url, 'privacy policy'), ' (' + privacy.version + ').')),
+  h('div', { className: 'mt-3' },
+    h('button', { type: 'submit', className: 'btn btn-primary', disabled: busy || !all }, busy ? 'Working…' : submitLabel),
+    onBack ? ' ' : null,
+    onBack ? h('button', { type: 'button', className: 'btn btn-link', disabled: busy, onClick: onBack }, 'Back') : null))
+}
+
 function when (iso) {
   if (!iso) return 'not yet'
   const d = new Date(iso)
@@ -96,6 +145,9 @@ export default function PluginConfigurationPanel (props) {
   const [key, setKey] = useState('')
   const [preview, setPreview] = useState(null)   // resolve answer, while confirming
   const [identity, setIdentity] = useState({})
+  const [step, setStep] = useState('identity')   // URL mode: 'identity' then 'consent'
+  const [keyConsent, setKeyConsent] = useState(null) // key mode: the summary to approve
+  const [review, setReview] = useState(null)     // connected boat: the summary to (re)approve
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [deny, setDeny] = useState((advanced.deny || []).join('\n'))
@@ -119,6 +171,11 @@ export default function PluginConfigurationPanel (props) {
 
   const conn = (status && status.connection) || {}
   const connected = conn.status === 'connected'
+  const denyList = (advanced.deny || []).map(String).filter(Boolean)
+  const consentStatus = (status && status.consent_status) || null
+  const consentRecord = (status && status.consent_record) || null
+  const parked = status && status.state === 'consent_required'
+  const needsApproval = connected && (parked || (consentStatus && NEEDS_APPROVAL.includes(consentStatus.state)))
   const origin = conn.origin || DEFAULT_ORIGIN
 
   // A plugin that is switched off has no runtime to answer. Saving the
@@ -156,10 +213,14 @@ export default function PluginConfigurationPanel (props) {
     try {
       await ensureRunning()
       if (key.trim()) {
-        await call('POST', '/connect/key', { url: url.trim(), key: key.trim() })
+        const answer = await call('POST', '/connect/key', { url: url.trim(), key: key.trim() })
         setKey('')
-        await refresh()
-        persistConnected()
+        if (answer.status === 'consent') {
+          setKeyConsent(answer)
+        } else {
+          await refresh()
+          persistConnected()
+        }
       } else {
         const answer = await call('POST', '/connect/resolve', { url: url.trim() })
         setPreview(answer)
@@ -167,6 +228,7 @@ export default function PluginConfigurationPanel (props) {
         const filled = {}
         for (const [k] of IDENTITY_FIELDS) filled[k] = found[k] === null || found[k] === undefined ? '' : String(found[k])
         setIdentity(filled)
+        setStep('identity')
       }
     } catch (e) {
       setError(e.message)
@@ -178,15 +240,57 @@ export default function PluginConfigurationPanel (props) {
   async function onConfirm (ev) {
     if (ev) ev.preventDefault()
     setError('')
+    // A cloud that asks for consent: the summary comes next, and nothing is
+    // paired until it is approved.
+    if (preview && preview.consent && step === 'identity') { setStep('consent'); return }
+    return submitConfirm(undefined)
+  }
+
+  async function submitConfirm (accepted) {
+    setError('')
     setBusy(true)
     try {
-      await call('POST', '/connect/confirm', { identity })
+      await call('POST', '/connect/confirm', accepted ? { identity, consent: { accepted } } : { identity })
       setPreview(null)
+      setKeyConsent(null)
+      setStep('identity')
       await refresh()
       persistConnected()
     } catch (e) {
       setError(e.message)
-      if (e.code === 'nothing_to_confirm' || e.code === 'unknown_or_expired_code') setPreview(null)
+      if (e.code === 'consent_stale' && e.consent) {
+        if (preview) setPreview({ ...preview, consent: e.consent })
+        if (keyConsent) setKeyConsent({ ...keyConsent, consent: e.consent })
+      }
+      if (e.code === 'nothing_to_confirm' || e.code === 'unknown_or_expired_code' ||
+          e.code === 'invalid_or_expired_code') { setPreview(null); setKeyConsent(null) }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onReview () {
+    setError('')
+    setBusy(true)
+    try {
+      setReview(await call('GET', '/consent'))
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onApprove (accepted) {
+    setError('')
+    setBusy(true)
+    try {
+      await call('POST', '/consent', { accepted })
+      setReview(null)
+      await refresh()
+    } catch (e) {
+      setError(e.message)
+      if (e.code === 'consent_stale' && e.consent) setReview({ ...review, consent: e.consent })
     } finally {
       setBusy(false)
     }
@@ -220,8 +324,28 @@ export default function PluginConfigurationPanel (props) {
   const errorBox = error ? h('div', { className: 'alert alert-danger', role: 'alert' }, error) : null
 
   let connection
-  if (connected) {
+  if (connected && review) {
+    connection = h(ConsentForm, {
+      consent: review.consent,
+      deny: denyList,
+      busy,
+      submitLabel: 'Approve',
+      onSubmit: onApprove,
+      onBack: () => setReview(null)
+    })
+  } else if (connected) {
     connection = h('div', null,
+      needsApproval
+        ? h('div', { className: 'alert alert-warning small' },
+          parked
+            ? 'Nothing is being sent: yey.boats needs your approval of what this server shares. '
+            : (consentStatus && consentStatus.state === 'reconsent_due'
+              ? 'The terms or what is shared changed. Please review and approve again' +
+                (consentStatus.reconsent_by ? ' by ' + when(consentStatus.reconsent_by) : '') + '. '
+              : 'Please review and approve what this server shares with yey.boats. '),
+          h('button', { type: 'button', className: 'btn btn-warning btn-sm ms-1', disabled: busy, onClick: onReview },
+            'Review and approve'))
+        : null,
       h('p', { className: 'mb-1' },
         h('strong', null, 'Connected to '),
         h('a', { href: origin, target: '_blank', rel: 'noopener noreferrer' }, origin.replace(/^https?:\/\//, '')),
@@ -229,9 +353,34 @@ export default function PluginConfigurationPanel (props) {
       h('ul', { className: 'list-unstyled small text-muted mb-3' },
         h('li', null, 'Last sent: ' + when(conn.last_sent_at)),
         h('li', null, 'Plan version: ' + ((status && status.plan_version) || 'none yet')),
+        consentRecord
+          ? h('li', null, 'Approved ' + when(consentRecord.accepted_at) + ', terms version ' + consentRecord.terms_version +
+            (consentRecord.terms_draft ? ' (draft)' : ''))
+          : null,
         status && status.detail ? h('li', null, 'Status: ' + status.state + ' (' + status.detail + ')') : null),
       h('button', { type: 'button', className: 'btn btn-outline-danger btn-sm', disabled: busy, onClick: onDisconnect },
         'Disconnect'))
+  } else if (keyConsent) {
+    connection = h(ConsentForm, {
+      consent: keyConsent.consent,
+      deny: denyList,
+      busy,
+      intro: 'Connecting with a key' + (keyConsent.boat && keyConsent.boat.display_name ? ' for "' + keyConsent.boat.display_name + '"' : '') +
+        '. Nothing is sent until you approve.',
+      submitLabel: 'Agree and connect',
+      onSubmit: submitConfirm,
+      onBack: () => setKeyConsent(null)
+    })
+  } else if (preview && step === 'consent') {
+    connection = h(ConsentForm, {
+      consent: preview.consent,
+      deny: denyList,
+      busy,
+      intro: 'Nothing is sent until you approve.',
+      submitLabel: 'Agree and connect',
+      onSubmit: submitConfirm,
+      onBack: () => setStep('identity')
+    })
   } else if (preview) {
     connection = h('form', { onSubmit: onConfirm },
       h('h6', null, 'Is this your boat?'),
@@ -251,7 +400,8 @@ export default function PluginConfigurationPanel (props) {
             onChange: (e) => setIdentity({ ...identity, [k]: e.target.value })
           })))),
       h('div', { className: 'mt-3' },
-        h('button', { type: 'submit', className: 'btn btn-primary', disabled: busy }, busy ? 'Connecting…' : 'Confirm'),
+        h('button', { type: 'submit', className: 'btn btn-primary', disabled: busy },
+          busy ? 'Connecting…' : (preview.consent ? 'Next' : 'Confirm')),
         ' ',
         h('button', { type: 'button', className: 'btn btn-link', disabled: busy, onClick: () => setPreview(null) }, 'Back')))
   } else {
