@@ -13,22 +13,33 @@ Details: <https://yey.boats/pricing?source=plugin>.
 
 ## What leaves the boat
 
-- **Only the SignalK paths your plan selects**, at the rate the plan sets. The plan
-  cannot exceed the consent you gave when you paired.
+Everything below goes over one outbound connection to `cloudOrigin` (https://yey.boats by
+default). Nothing listens on the boat, and the SignalK access token never leaves it.
+
+- **Values, only for the SignalK paths your plan selects**, at the rate the plan sets.
+  The default consent is position, speed and course over ground, heading, apparent wind,
+  depth and notifications. The plan can never exceed the consent you gave when you paired.
 - **The deny list in the plugin settings always wins.** A path you deny is dropped on
   the boat, before anything is sent, no matter what the cloud asks for.
-- **A capability document at connect time**: which paths this server has, their units
-  and their gear (manufacturer/model from SignalK `meta`), plus the connector version
-  and its limits. That is what lets the web page show you what you could turn on.
-- **Nothing inbound.** The connection is outbound-only — there is no port to forward
-  and nothing listens on the boat's public side. Your router does not change.
-- Values that could not be sent during an outage are buffered locally and replayed
-  when the link comes back; the same consent and deny rules apply to the replay.
+- **A hello when the connector connects:** the connector and SignalK versions, the
+  connector's limits and buffer size, the **vessel name and MMSI** from SignalK, and the
+  names of the installed SignalK plugins. The cloud keeps the versions, name and MMSI with
+  the boat. It does not keep the plugin list.
+- **A catalogue of what this server has:** the name, units and description of each
+  `vessels/self` path (up to 250), and the gear manufacturer and model from SignalK `meta`.
+  This lists paths, not their values, and it is sent whatever the plan selects, so the web
+  page can show what you could turn on.
+- Values that could not be sent during an outage are buffered on the boat (50 MB by
+  default) and replayed when the link comes back. The same consent and deny rules apply
+  to the replay.
 
 The boat credential stays in this SignalK server's own plugin options file. The cloud
 keeps only a hash of it.
 
-Details: <https://yey.boats/privacy?source=plugin>.
+What the cloud does with the data: the latest value of each path is kept for answering
+questions, history is kept for 7 days by default, and both are visible to you and to
+crew you invite. Questions you ask in the chat, with the boat data the answer needs, go
+to the AI providers named in the privacy policy: <https://yey.boats/privacy?source=plugin>.
 
 ## Self-hosting
 
