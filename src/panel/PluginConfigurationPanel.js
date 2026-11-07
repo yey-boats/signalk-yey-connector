@@ -94,6 +94,7 @@ function ConsentForm ({ consent, deny, busy, submitLabel, onSubmit, onBack, intr
       onChange: (e) => setTicks({ ...ticks, [id]: e.target.checked })
     }),
     h('label', { className: 'form-check-label', htmlFor: 'yey-consent-' + id }, label))
+  const asked = new Set((consent.on_request || []).map((f) => f.path))
   return h('form', {
     onSubmit: (ev) => { ev.preventDefault(); onSubmit({ data_plan: ticks.data_plan, terms: ticks.terms, privacy: ticks.privacy }) }
   },
@@ -101,7 +102,8 @@ function ConsentForm ({ consent, deny, busy, submitLabel, onSubmit, onBack, intr
   intro ? h('p', { className: 'small' }, intro) : null,
   h('p', { className: 'small mb-1' }, h('strong', null, 'Sent to yey.boats'), ' (only these, at the rate your plan sets):'),
   h('ul', { className: 'small' }, (consent.send || []).map((f) =>
-    h('li', { key: f.path }, f.label ? f.label + ' ' : '', h('code', null, f.path)))),
+    h('li', { key: f.path }, f.label ? f.label + ' ' : '', h('code', null, f.path),
+      asked.has(f.path) ? h('span', { className: 'text-muted' }, ' (only when a question needs it)') : null))),
   h('p', { className: 'small mb-1' }, h('strong', null, 'Never sent'), ' (your Advanced list, which always wins):'),
   h('p', { className: 'small' }, deny && deny.length ? deny.map((d) => h('code', { key: d, className: 'me-2' }, d)) : 'nothing listed'),
   h('p', { className: 'small mb-1' }, h('strong', null, 'Also sent when connecting:'),

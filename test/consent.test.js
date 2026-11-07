@@ -18,6 +18,16 @@ test('a consent summary parses into what the panel renders', () => {
   assert.equal(doc.storage.history_days, 7)
 })
 
+test('on_request marks entries of send, never anything outside it', () => {
+  assert.deepEqual(parseConsentDocument(CONSENT).on_request, [])
+  const doc = parseConsentDocument({
+    ...CONSENT,
+    on_request: [{ path: 'environment.depth.belowTransducer', label: 'Depth' }, 'not.in.send']
+  })
+  assert.deepEqual(doc.on_request, [{ path: 'environment.depth.belowTransducer', label: 'Depth' }])
+  assert.deepEqual(sendPaths(doc), ['navigation.position', 'environment.depth.belowTransducer'])
+})
+
 test('null is "no consent asked", anything malformed is invalid_document', () => {
   assert.equal(parseConsentDocument(null), null)
   for (const bad of [{}, { ...CONSENT, kind: 'x' }, { ...CONSENT, summary_hash: 'short' },

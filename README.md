@@ -78,8 +78,8 @@ URL by default, so download the file first:
 
 ```bash
 cd ~/.signalk
-curl -LO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.1.0/signalk-yey-connector-0.1.0.tgz
-npm install ./signalk-yey-connector-0.1.0.tgz
+curl -LO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.2.0/signalk-yey-connector-0.2.0.tgz
+npm install ./signalk-yey-connector-0.2.0.tgz
 ```
 
 Restart the server. The plugin appears under **Server → Plugin Config** as
