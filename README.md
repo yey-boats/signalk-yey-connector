@@ -28,6 +28,12 @@ on the boat. The plugin reads SignalK in-process, so there is no SignalK token t
 - **When you connect, the boat details you confirm:** name, MMSI, call sign, type,
   length, beam and draft, read from this server and corrected by you. They become the
   boat's record on yey.boats.
+- **AIS traffic around the boat, only if you consented to `ais`.** Off by default. When
+  your consent includes the item `ais` (on yey.boats: Account → your boat → "Share AIS
+  traffic seen by this boat"), the connector also forwards the other vessels this server
+  sees on AIS: each target's MMSI, name, position, course, speed and ship type, at most
+  every 30 seconds per target and only when it changed. Your own boat is never in it.
+  Put `ais` in the deny list to keep it on the boat whatever the plan says.
 - **The deny list in the plugin settings always wins.** A path you deny is dropped on
   the boat, before anything is sent, no matter what the cloud asks for.
 - **A hello when the connector connects:** the connector and SignalK versions, the
