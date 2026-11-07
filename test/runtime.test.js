@@ -470,3 +470,23 @@ test('a path that appears after discovery triggers re-discovery and a re-plan', 
   await h.runtime.tick()
   assert.equal(h.published.filter((p) => p.subject === 'yey.boat.catalog').length, 2)
 })
+
+test('with an empty plan (gathering off) the tree is still checked for new paths', async () => {
+  const h = harness({ replies: [
+    { kind: 'plan', plan: planV(1, []), etag: 'e0' },
+    { kind: 'plan', plan: planV(2, [POSITION]), etag: 'e1' }
+  ] })
+  let tree = { design: { length: { value: { overall: 11.6 } } } }
+  h.runtime.__setSource({ ...SOURCE_STUB, selfTree: async () => tree, collectMeta: async () => ({}) })
+  h.runtime.setConsent(CONSENT)
+  await h.runtime.handshake()
+  await h.runtime.discover()
+  tree = { ...tree, navigation: { position: { value: { latitude: -17.5, longitude: -149.6 } } } }
+  h.advance(60_000)
+  await h.runtime.tick()
+  assert.equal(h.requests.length, 1, 'too early for a tree check')
+  h.advance(61_000)
+  await h.runtime.tick()
+  assert.equal(h.published.filter((p) => p.subject === 'yey.boat.catalog').length, 2)
+  assert.equal(h.requests.length, 2, 'new paths -> re-plan')
+})
