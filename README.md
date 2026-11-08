@@ -72,19 +72,40 @@ that than promise one.
 
 ## Install
 
-Not in the SignalK Appstore yet. Install the release in the SignalK server's data
-directory. npm 12 (shipped with current SignalK images) refuses to install from a
-URL by default, so download the file first:
+The connector is **not in the SignalK Appstore yet**: the Appstore lists npm packages,
+and this one is not published to npm. Until it is, install the release tarball from
+GitHub.
+
+1. Download `signalk-yey-connector-<version>.tgz` from the
+   [latest release](https://github.com/yey-boats/signalk-yey-connector/releases/latest)
+   onto the machine that runs SignalK. Download the file first: npm 12 (shipped with
+   current SignalK images) refuses to install from a URL (`allow-remote=none`).
+2. Install it from the file, in the SignalK config directory:
+
+   ```bash
+   cd ~/.signalk
+   curl -fLO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.2.0/signalk-yey-connector-0.2.0.tgz
+   npm install ./signalk-yey-connector-0.2.0.tgz
+   ```
+
+   (Already downloaded it elsewhere? `npm install /path/to/signalk-yey-connector-<version>.tgz`.)
+3. Restart SignalK (**Restart** in the admin UI, or `sudo systemctl restart signalk`),
+   then **reload the admin page** in your browser. Until you reload, the plugin panel
+   says "Module signalk-yey-connector is not available".
+
+The plugin then appears under **Server → Plugin Config** as "yey — cloud connector",
+with its own connection panel. To update, do the same with the newer release.
+
+**SignalK in Docker.** From the folder with the downloaded file (replace `signalk`
+with your container's name):
 
 ```bash
-cd ~/.signalk
-curl -LO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.2.0/signalk-yey-connector-0.2.0.tgz
-npm install ./signalk-yey-connector-0.2.0.tgz
+docker cp signalk-yey-connector-0.2.0.tgz signalk:/tmp/
+docker exec -w /home/node/.signalk signalk npm install /tmp/signalk-yey-connector-0.2.0.tgz
+docker restart signalk
 ```
 
-Restart the server. The plugin appears under **Server → Plugin Config** as
-"yey — cloud connector", with its own connection panel. To update, do the same with
-the newer release.
+Installing from the Appstore will work once the connector is published to npm.
 
 To try it without a boat, see `bench/polynesia/`: a SignalK server and the yey
 simulator sailing near Tahiti, in Docker.
