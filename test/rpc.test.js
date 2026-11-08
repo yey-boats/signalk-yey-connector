@@ -211,10 +211,13 @@ test('catalog without a stored one walks the tree', async () => {
 
 test('writes and controls are refused as not_permitted, whatever the path', async () => {
   const s = server()
-  for (const op of ['write', 'put', 'set', 'control', 'actuate']) {
+  for (const op of ['write', 'set', 'control', 'actuate']) {
     const reply = await s.rpc.handle(req(op, { path: 'navigation.position', value: 1 }))
     assert.equal(reply.error, REFUSAL.NOT_PERMITTED, op)
   }
+  // `put` is remote steering (test/remote-steering.test.js): off by default.
+  const put = await s.rpc.handle(req('put', { path: 'navigation.position', value: 1 }))
+  assert.equal(put.error, REFUSAL.REMOTE_STEERING_OFF)
   assert.equal((await s.rpc.handle(req('reboot'))).error, REFUSAL.UNSUPPORTED)
 })
 

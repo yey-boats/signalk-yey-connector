@@ -151,6 +151,8 @@ export default function PluginConfigurationPanel (props) {
   const [error, setError] = useState('')
   const [deny, setDeny] = useState((advanced.deny || []).join('\n'))
   const [bufferMb, setBufferMb] = useState(advanced.bufferMegabytes || 50)
+  // Remote steering: the owner's own switch, off unless saved as exactly true.
+  const [steering, setSteering] = useState(configuration.remote_steering === true)
   const [savedNote, setSavedNote] = useState('')
 
   const refresh = useCallback(async () => {
@@ -319,7 +321,11 @@ export default function PluginConfigurationPanel (props) {
     ev.preventDefault()
     const list = deny.split('\n').map((s) => s.trim()).filter(Boolean)
     const mb = Math.max(1, Number(bufferMb) || 50)
-    const next = { ...configuration, advanced: { ...advanced, deny: list, bufferMegabytes: mb } }
+    const next = {
+      ...configuration,
+      remote_steering: steering === true,
+      advanced: { ...advanced, deny: list, bufferMegabytes: mb }
+    }
     delete next.key
     save(next)
     setSavedNote('Saved. The connector restarts with the new settings.')
@@ -470,6 +476,18 @@ export default function PluginConfigurationPanel (props) {
             value: bufferMb, onChange: (e) => setBufferMb(e.target.value)
           }),
           'Kept on this server while there is no internet, sent when it is back.'),
+        h('div', { className: 'form-check mb-1' },
+          h('input', {
+            id: 'yey-remote-steering', className: 'form-check-input', type: 'checkbox',
+            checked: steering, onChange: (e) => setSteering(e.target.checked)
+          }),
+          h('label', { className: 'form-check-label', htmlFor: 'yey-remote-steering' },
+            'Allow remote steering from yey.boats (autopilot only)')),
+        h('div', { className: 'form-text mb-3' },
+          'Off by default. Only the autopilot can be changed (mode, heading / wind-angle target, ' +
+          'autopilot actions), by your own autopilot plugin. You must also turn it on in the ' +
+          'yey.boats app with a code sent to your Telegram. The list above still applies. ' +
+          'Untick and Save to switch it off.'),
         h('button', { type: 'submit', className: 'btn btn-secondary btn-sm' }, 'Save'),
         savedNote ? h('span', { className: 'ms-2 small text-success' }, savedNote) : null)),
     h('p', { className: 'small text-muted mt-4 mb-0' },
