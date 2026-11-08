@@ -44,6 +44,9 @@ module.exports = function signalkYeyConnectorPlugin (app) {
     // this schema; the schema still describes the options file, and is the form
     // an older admin UI falls back to. Routing, boat id and credential are NOT
     // here: they live in the connector's private state file (lib/state.js).
+    // There is no `key` field any more (yey.boats connects by link); a `key`
+    // already in an options file (a provisioned install) still connects once
+    // and is then removed (lib/runtime.js start()).
     schema: () => ({
       type: 'object',
       title: 'yey — cloud connector',
@@ -54,13 +57,7 @@ module.exports = function signalkYeyConnectorPlugin (app) {
         connectionUrl: {
           type: 'string',
           title: 'Connection URL',
-          description: 'From yey.boats, for example https://yey.boats/c/ABC-DEF-GHJ',
-          default: ''
-        },
-        key: {
-          type: 'string',
-          title: 'Key (only if yey.boats gave you one)',
-          description: 'Used once to connect, then removed from these settings.',
+          description: 'From yey.boats, for example https://yey.boats/c/ABC-DEF-GHJ (or just the code)',
           default: ''
         },
         advanced: {

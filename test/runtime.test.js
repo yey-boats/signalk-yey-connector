@@ -67,7 +67,8 @@ function harness ({ replies = [], options = {}, reported = [],
       // The cloud half of yey_boat_hello, verbatim in shape:
       //   if str(payload.get("plan_etag") or "") == etag and etag: -> not_modified
       if (next.etag && String(payload.plan_etag || '') === String(next.etag)) {
-        return { kind: 'plan', not_modified: true, etag: next.etag }
+        // reply.boat rides on both answers, as in yey_boat_hello.
+        return { kind: 'plan', not_modified: true, etag: next.etag, ...(next.boat ? { boat: next.boat } : {}) }
       }
       servedEtag = String(next.etag || '')
       return next
@@ -504,4 +505,78 @@ test('sent values are reported to SignalK so the plugin shows in Connection acti
   h.runtime.__setPublish(async () => ({ status: 'accepted', accepted: [{}], rejected: [] }))
   await h.runtime.flush()
   assert.deepEqual(reported, [1])
+})
+
+// ── Display name sync (lib/display-name.js) ──────────────────────────────────
+
+test('a rename on yey.boats arrives on the hello reply and is shown in the panel', async () => {
+  const h = harness({ replies: [
+    { kind: 'plan', plan: planV(1, [POSITION]), etag: 'e1',
+      boat: { display_name: 'Sea Breeze', display_name_set_at: '2026-11-08T10:00:00.000Z',
+              server_time: new Date(1_000_000).toISOString() } }
+  ] })
+  h.runtime.setConsent(CONSENT)
+  await h.runtime.handshake()
+  const conn = h.runtime.snapshot().connection
+  assert.equal(conn.display_name, 'Sea Breeze')
+  assert.equal(conn.display_name_sync, 'synced')
+  assert.equal('display_name' in h.requests[0].payload.hello, false,
+    'nothing was chosen on the boat, so the hello is the 0.2.0 one')
+})
+
+test('a not_modified reply still carries the name', async () => {
+  const boat = { display_name: 'Renamed', display_name_set_at: '2026-11-08T10:00:00.000Z' }
+  const h = harness({ replies: [
+    { kind: 'plan', plan: planV(1, [POSITION]), etag: 'e1' },
+    { kind: 'plan', not_modified: true, etag: 'e1', boat }
+  ] })
+  h.runtime.setConsent(CONSENT)
+  await h.runtime.handshake()
+  await h.runtime.handshake()
+  assert.equal(h.runtime.snapshot().connection.display_name, 'Renamed')
+  assert.equal(h.runtime.snapshot().plan_version, 1, 'the plan is untouched')
+})
+
+test('a rename in the panel goes out at the next tick, stamped on the cloud clock', async () => {
+  const h = harness({ replies: [
+    // The cloud's clock is 5 s ahead of ours.
+    { kind: 'plan', plan: planV(1, [POSITION]), etag: 'e1',
+      boat: { display_name: 'New boat', display_name_set_at: null,
+              server_time: new Date(1_005_000).toISOString() } },
+    { kind: 'plan', plan: planV(1, [POSITION]), etag: 'e1' }
+  ] })
+  h.runtime.setConsent(CONSENT)
+  await h.runtime.handshake()
+  const out = await h.runtime.setDisplayName({ name: '  Sea  Breeze ' })
+  assert.equal(out.display_name, 'Sea Breeze')
+  assert.equal(out.display_name_set_at, new Date(1_005_000).toISOString())
+  assert.equal(h.runtime.snapshot().connection.display_name, 'Sea Breeze')
+  assert.equal(h.runtime.snapshot().connection.display_name_sync, 'pending')
+
+  h.advance(1_000)                 // far short of the 300 s heartbeat
+  await h.runtime.tick()
+  assert.equal(h.requests.length, 2, 'the rename asked for a hello now')
+  assert.deepEqual(h.requests[1].payload.hello.display_name,
+    { value: 'Sea Breeze', set_at: new Date(1_005_000).toISOString() })
+})
+
+test('the cloud confirming the rename marks it synced; an older cloud says unsupported', async () => {
+  const h = harness({ replies: [
+    { kind: 'plan', plan: planV(1, [POSITION]), etag: 'e1' },     // no reply.boat: old cloud
+    { kind: 'plan', plan: planV(1, [POSITION]), etag: 'e1',
+      boat: { display_name: 'Sea Breeze', display_name_set_at: '2026-11-08T10:00:00.000Z' } }
+  ] })
+  h.runtime.setConsent(CONSENT)
+  await h.runtime.handshake()
+  await h.runtime.setDisplayName({ name: 'Sea Breeze' })
+  assert.equal(h.runtime.snapshot().connection.display_name_sync, 'unsupported')
+  await h.runtime.handshake()
+  assert.equal(h.runtime.snapshot().connection.display_name_sync, 'synced')
+})
+
+test('renaming needs a connected boat and a name', async () => {
+  const h = harness({ options: { boatId: '', boatCredential: '' } })
+  await assert.rejects(h.runtime.setDisplayName({ name: 'X' }), (e) => e.code === 'not_connected')
+  const c = harness()
+  await assert.rejects(c.runtime.setDisplayName({ name: '  ' }), (e) => e.code === 'invalid_name')
 })
