@@ -56,7 +56,8 @@ on the boat. The plugin reads SignalK in-process, so there is no SignalK token t
   connection the cloud may ask for the current value, metadata or (if this server has a
   history provider) the history of a single path, when the navigator needs it to answer
   you. The boat answers only paths inside your consent that the plan either sends or marks
-  *on request*, never a denied path, never a write or control (those are refused), at most
+  *on request*, never a denied path, never a write or control (those are refused, except
+  autopilot commands when you have turned on [remote steering](#remote-steering)), at most
   30 a minute, each answer capped at 64 KB.
 - Values that could not be sent during an outage are buffered on the boat (50 MB by
   default) and replayed when the link comes back. The same consent and deny rules apply
@@ -175,6 +176,7 @@ The panel replaces the generated settings form. What it writes:
 | `key` | *(not in the panel)* | Provisioned installs only: put in the file by hand, consumed on start and removed. |
 | `advanced.deny` | `[]` | Paths that must never leave the boat (a path covers everything under it). Always wins over the plan. In the panel's collapsed **Advanced** section. |
 | `advanced.bufferMegabytes` | `50` | How much to keep while offline. Also under **Advanced**. |
+| `remote_steering` | `false` | Allow remote steering from yey.boats, autopilot only. See [Remote steering](#remote-steering). Also under **Advanced**. |
 
 Switching the plugin off in Plugin Config stops sending.
 
@@ -184,6 +186,29 @@ Switching the plugin off in Plugin Config stops sending.
 the private state file, deny and buffer under `advanced`. The settings file is then
 rewritten without them. A paired boat keeps working with no action. `signalkUrl` and
 `signalkToken` are no longer used, and neither is read-only access on the server.
+
+## Remote steering
+
+Off by default. When it is on, the yey.boats dashboard can send autopilot commands to
+this boat. The connector hands them to this SignalK server as an ordinary SignalK PUT,
+and your own autopilot plugin carries them out.
+
+- **Both switches are needed.** This plugin's own setting (**Advanced** → *Allow remote
+  steering from yey.boats*, option `remote_steering`) AND remote steering turned on in
+  the yey.boats app, which asks for a code sent to your Telegram. The cloud cannot change
+  the setting on the boat.
+- **Autopilot paths only:** `steering.autopilot.state`,
+  `steering.autopilot.target.headingTrue`, `steering.autopilot.target.windAngleApparent`
+  and `steering.autopilot.actions.<action>` (for example `adjustHeading`, `tack`). The
+  value must be a plain boolean, number or short string. Anything else is refused.
+- **Your deny list still wins:** add `steering.autopilot` under **Advanced** → *Never send
+  these paths* to refuse every command whatever the switches say.
+- At most 12 commands a minute. Every command, carried out or refused, is written to the
+  server log (debug) and shown as the plugin status, for example
+  `Remote steering: steering.autopilot.state=auto accepted 12:03`.
+- **To turn it off:** untick the setting under **Advanced** and press **Save** (the
+  plugin restarts and refuses all commands), or switch it off in the yey.boats app, or
+  switch the plugin off.
 
 ## Requirements
 

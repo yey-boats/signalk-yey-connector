@@ -1,6 +1,6 @@
 {
   "name": "signalk-yey-connector",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Connect this SignalK server to yey.boats — a plan-driven, outbound-only cloud uplink.",
   "main": "index.js",
   "keywords": [
