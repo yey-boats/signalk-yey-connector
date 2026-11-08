@@ -539,3 +539,23 @@ test('consent_required at the token claim parks the link; approving dials again'
   assert.notEqual(runtime.snapshot().state, 'consent_required')
   runtime.stop()
 })
+
+test('resolve takes a link behind autofill junk, or the bare code, and says which link it used', async () => {
+  for (const pasted of ['adminhttps://yey.boats/c/ABC-DEF-GHJ', 'abc-def-ghj']) {
+    const h = harness()
+    await h.runtime.start()
+    const out = await h.runtime.resolveConnection({ url: pasted })
+    assert.equal(out.status, 'confirm')
+    assert.equal(out.url, URL_CODE, `${pasted} -> the clean link the panel saves`)
+  }
+})
+
+test('the display name from pairing is not one the owner chose on the boat', async () => {
+  const h = harness()
+  await h.runtime.start()
+  await h.runtime.resolveConnection({ url: URL_CODE })
+  await h.runtime.confirmConnection({})
+  const saved = JSON.parse(fs.readFileSync(h.stateFile, 'utf8'))
+  assert.equal(saved.display_name, 'Sara')
+  assert.equal(saved.display_name_set_at, '', 'so the first hello does not claim it')
+})

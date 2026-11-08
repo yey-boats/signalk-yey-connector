@@ -9,7 +9,7 @@
 
 const MESSAGES = {
   // Pasting the link
-  invalid_url: 'Paste the connection link from yey.boats. It starts with https://',
+  invalid_url: 'Paste the connection link from yey.boats (it starts with https://) or the code it shows.',
   unreachable: 'Could not reach yey.boats from this server. Check its internet connection and try again.',
   unknown_or_expired_code: 'This link is unknown or has expired. Get a fresh one on yey.boats.',
   invalid_document: 'This is not a yey.boats connection link.',
@@ -21,6 +21,7 @@ const MESSAGES = {
   not_connected: 'Connect to yey.boats first.',
   plugin_stopped: 'The connector is not running.',
   network: 'The SignalK server did not answer.',
+  invalid_name: 'A boat name cannot be empty.',
 
   // yey.boats refusing the pairing
   invalid_or_expired_code: 'This link was already used or has expired. Get a fresh one on yey.boats.',

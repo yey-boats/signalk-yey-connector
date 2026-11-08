@@ -264,3 +264,15 @@ test('jsonBody uses a body the host already parsed instead of waiting on a drain
   await new Promise((resolve) => jsonBody()(drained, res(), resolve))
   assert.deepEqual(drained.body, {})
 })
+
+test('POST /display-name renames through the runtime', async () => {
+  const r = fakeRouter()
+  let asked = null
+  registerRoutes(r, () => runtimeStub({
+    setDisplayName: async ({ name }) => { asked = name; return { display_name: name, display_name_sync: 'pending' } }
+  }))
+  const out = res()
+  await r.routes['POST /display-name']({ method: 'POST', body: { display_name: 'Sea Breeze' } }, out)
+  assert.equal(asked, 'Sea Breeze')
+  assert.equal(out.body.display_name, 'Sea Breeze')
+})

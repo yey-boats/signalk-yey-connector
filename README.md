@@ -91,12 +91,12 @@ simulator sailing near Tahiti, in Docker.
 
 ## Connecting
 
-1. On yey.boats, open **Account → Connect a SignalK server** and copy the connection
-   link, for example `https://yey.boats/c/ABC-DEF-GHJ`. It works once and lives 15
-   minutes.
+1. On yey.boats, open **Add a boat** (or **Account → Connect a SignalK server** for a boat
+   you already have) and copy the connection link, for example
+   `https://yey.boats/c/ABC-DEF-GHJ`. It works once and lives 15 minutes.
 2. In SignalK, open **Server → Plugin Config → yey — cloud connector**, paste the link
-   into **Connection URL** and press **Connect**. (If the plugin is switched off,
-   Connect switches it on.)
+   (or just the code, `ABC-DEF-GHJ`) into **Connection link** and press **Connect**. (If
+   the plugin is switched off, Connect switches it on.)
 3. **Is this your boat?** The panel shows the name, MMSI, call sign, type, length, beam
    and draft this server knows. Correct anything that is wrong and press **Next**.
 4. **What this server will share.** Read the summary, tick the three boxes and press
@@ -107,14 +107,23 @@ simulator sailing near Tahiti, in Docker.
    the plan version. **Disconnect** forgets the connection on this server (it does not
    delete the boat on yey.boats).
 
-**With a key.** For scripted or provisioned installs yey.boats can issue a key for one
-boat (`yk1.…`); you accept the same summary on yey.boats when you issue it. Paste the
-link yey.boats gives with it (`https://yey.boats/c/key`) and the key into **Key**, and
-press **Connect**: there is no boat confirm step, but the panel still shows what will be
-shared and asks for the three boxes before the key is used. A key can also be put in the
-settings file (`connectionUrl` and `key`); the plugin connects with it on start (relying
-on the acceptance you gave when the key was issued) and then removes the key from the
-file.
+**The boat's name.** Until you name it, the boat takes the name SignalK knows it by.
+**Rename** next to *Connected to yey.boats as …* changes it here and on yey.boats; renaming
+the boat on yey.boats (Account, or the boat menu) changes it here too, at the next
+heartbeat. The most recent rename wins. (The name rides on the hello: the connector sends
+`hello.display_name = {value, set_at}` only after a rename here, and every hello reply from
+yey.boats carries `boat = {display_name, display_name_set_at, server_time}`. A yey.boats
+that predates this ignores the first and omits the second, and the panel then says a
+rename here stays here.)
+
+**Pasting.** The link field ignores anything in front of `https://` — a password manager
+that filled the SignalK login into it (`adminhttps://…`) does no harm — and takes a bare
+code on `https://yey.boats`.
+
+**Provisioned installs (a key).** The panel no longer asks for a key: yey.boats connects
+by link. A key already in the settings file (`connectionUrl` and `key`) still connects
+on start (relying on the acceptance given when the key was issued) and is then removed
+from the file.
 
 **Connected before consent existed?** The plugin keeps sending, and the panel shows
 **Review and approve**. If yey.boats ever pauses a boat for want of approval, the panel says
@@ -134,7 +143,7 @@ The panel replaces the generated settings form. What it writes:
 | Setting | Default | What it is |
 |---|---|---|
 | `connectionUrl` | *(empty)* | The connection link from yey.boats. |
-| `key` | *(empty)* | Only for key mode; consumed on start and removed. |
+| `key` | *(not in the panel)* | Provisioned installs only: put in the file by hand, consumed on start and removed. |
 | `advanced.deny` | `[]` | Paths that must never leave the boat (a path covers everything under it). Always wins over the plan. In the panel's collapsed **Advanced** section. |
 | `advanced.bufferMegabytes` | `50` | How much to keep while offline. Also under **Advanced**. |
 

@@ -142,12 +142,11 @@ export default function PluginConfigurationPanel (props) {
   const [status, setStatus] = useState(null)     // GET /status, or null while loading
   const [stopped, setStopped] = useState(false)  // the plugin is not running
   const [url, setUrl] = useState(configuration.connectionUrl || '')
-  const [key, setKey] = useState('')
   const [preview, setPreview] = useState(null)   // resolve answer, while confirming
   const [identity, setIdentity] = useState({})
-  const [step, setStep] = useState('identity')   // URL mode: 'identity' then 'consent'
-  const [keyConsent, setKeyConsent] = useState(null) // key mode: the summary to approve
+  const [step, setStep] = useState('identity')   // 'identity' then 'consent'
   const [review, setReview] = useState(null)     // connected boat: the summary to (re)approve
+  const [renaming, setRenaming] = useState(null) // the name being typed, or null
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [deny, setDeny] = useState((advanced.deny || []).join('\n'))
@@ -196,11 +195,13 @@ export default function PluginConfigurationPanel (props) {
     throw err
   }
 
-  // After connecting, write the link (and never the key) into the settings, so
-  // the plugin list stops showing it as unconfigured.
-  function persistConnected () {
-    if (configuration.connectionUrl !== url.trim() || configuration.key) {
-      const next = { ...configuration, connectionUrl: url.trim() }
+  // After connecting, write the link (and never a key) into the settings, so
+  // the plugin list stops showing it as unconfigured. `link` is the link the
+  // connector actually used (autofill junk and a bare code are cleaned up).
+  function persistConnected (link) {
+    const clean = String(link || url).trim()
+    if (configuration.connectionUrl !== clean || configuration.key) {
+      const next = { ...configuration, connectionUrl: clean }
       delete next.key
       save(next)
     }
@@ -212,24 +213,16 @@ export default function PluginConfigurationPanel (props) {
     setBusy(true)
     try {
       await ensureRunning()
-      if (key.trim()) {
-        const answer = await call('POST', '/connect/key', { url: url.trim(), key: key.trim() })
-        setKey('')
-        if (answer.status === 'consent') {
-          setKeyConsent(answer)
-        } else {
-          await refresh()
-          persistConnected()
-        }
-      } else {
-        const answer = await call('POST', '/connect/resolve', { url: url.trim() })
-        setPreview(answer)
-        const found = answer.identity || {}
-        const filled = {}
-        for (const [k] of IDENTITY_FIELDS) filled[k] = found[k] === null || found[k] === undefined ? '' : String(found[k])
-        setIdentity(filled)
-        setStep('identity')
-      }
+      // The connector cleans the input up (a link behind autofill junk, or a
+      // bare code) and answers with the link it used.
+      const answer = await call('POST', '/connect/resolve', { url: url.trim() })
+      if (answer.url) setUrl(answer.url)
+      setPreview(answer)
+      const found = answer.identity || {}
+      const filled = {}
+      for (const [k] of IDENTITY_FIELDS) filled[k] = found[k] === null || found[k] === undefined ? '' : String(found[k])
+      setIdentity(filled)
+      setStep('identity')
     } catch (e) {
       setError(e.message)
     } finally {
@@ -251,19 +244,16 @@ export default function PluginConfigurationPanel (props) {
     setBusy(true)
     try {
       await call('POST', '/connect/confirm', accepted ? { identity, consent: { accepted } } : { identity })
+      const link = preview && preview.url
       setPreview(null)
-      setKeyConsent(null)
       setStep('identity')
       await refresh()
-      persistConnected()
+      persistConnected(link)
     } catch (e) {
       setError(e.message)
-      if (e.code === 'consent_stale' && e.consent) {
-        if (preview) setPreview({ ...preview, consent: e.consent })
-        if (keyConsent) setKeyConsent({ ...keyConsent, consent: e.consent })
-      }
+      if (e.code === 'consent_stale' && e.consent && preview) setPreview({ ...preview, consent: e.consent })
       if (e.code === 'nothing_to_confirm' || e.code === 'unknown_or_expired_code' ||
-          e.code === 'invalid_or_expired_code') { setPreview(null); setKeyConsent(null) }
+          e.code === 'invalid_or_expired_code') setPreview(null)
     } finally {
       setBusy(false)
     }
@@ -291,6 +281,21 @@ export default function PluginConfigurationPanel (props) {
     } catch (e) {
       setError(e.message)
       if (e.code === 'consent_stale' && e.consent) setReview({ ...review, consent: e.consent })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onRename (ev) {
+    if (ev) ev.preventDefault()
+    setError('')
+    setBusy(true)
+    try {
+      await call('POST', '/display-name', { display_name: renaming })
+      setRenaming(null)
+      await refresh()
+    } catch (e) {
+      setError(e.message)
     } finally {
       setBusy(false)
     }
@@ -346,10 +351,35 @@ export default function PluginConfigurationPanel (props) {
           h('button', { type: 'button', className: 'btn btn-warning btn-sm ms-1', disabled: busy, onClick: onReview },
             'Review and approve'))
         : null,
-      h('p', { className: 'mb-1' },
-        h('strong', null, 'Connected to '),
-        h('a', { href: origin, target: '_blank', rel: 'noopener noreferrer' }, origin.replace(/^https?:\/\//, '')),
-        h('strong', null, conn.display_name ? ' as ' + conn.display_name : '')),
+      renaming !== null
+        ? h('form', { className: 'mb-2', autoComplete: 'off', onSubmit: onRename },
+          field('yey-display-name', 'Boat name',
+            h('input', {
+              id: 'yey-display-name', name: 'yey-boat-display-name', className: 'form-control form-control-sm',
+              type: 'text', autoComplete: 'off', spellCheck: false, maxLength: 80, required: true,
+              'data-lpignore': 'true', 'data-1p-ignore': 'true', 'data-form-type': 'other',
+              value: renaming, onChange: (e) => setRenaming(e.target.value)
+            }),
+            'Shown on yey.boats and here. Renaming the boat on yey.boats changes it here too; the latest change wins.'),
+          h('button', { type: 'submit', className: 'btn btn-primary btn-sm', disabled: busy || !renaming.trim() },
+            busy ? 'Saving…' : 'Save'),
+          ' ',
+          h('button', { type: 'button', className: 'btn btn-link btn-sm', disabled: busy, onClick: () => setRenaming(null) },
+            'Cancel'))
+        : h('p', { className: 'mb-1' },
+          h('strong', null, 'Connected to '),
+          h('a', { href: origin, target: '_blank', rel: 'noopener noreferrer' }, origin.replace(/^https?:\/\//, '')),
+          conn.display_name ? h('strong', null, ' as ' + conn.display_name) : null,
+          ' ',
+          h('button', {
+            type: 'button', className: 'btn btn-link btn-sm p-0 align-baseline', disabled: busy,
+            onClick: () => setRenaming(conn.display_name || '')
+          }, conn.display_name ? 'Rename' : 'Name this boat')),
+      conn.display_name_sync === 'pending'
+        ? h('p', { className: 'small text-muted mb-1' }, 'Saving the new name to yey.boats…')
+        : (conn.display_name_sync === 'unsupported'
+          ? h('p', { className: 'small text-muted mb-1' }, 'yey.boats does not take names from the connector yet; rename the boat on yey.boats.')
+          : null),
       h('ul', { className: 'list-unstyled small text-muted mb-3' },
         h('li', null, 'Last sent: ' + when(conn.last_sent_at)),
         h('li', null, 'Plan version: ' + ((status && status.plan_version) || 'none yet')),
@@ -360,17 +390,6 @@ export default function PluginConfigurationPanel (props) {
         status && status.detail ? h('li', null, 'Status: ' + status.state + ' (' + status.detail + ')') : null),
       h('button', { type: 'button', className: 'btn btn-outline-danger btn-sm', disabled: busy, onClick: onDisconnect },
         'Disconnect'))
-  } else if (keyConsent) {
-    connection = h(ConsentForm, {
-      consent: keyConsent.consent,
-      deny: denyList,
-      busy,
-      intro: 'Connecting with a key' + (keyConsent.boat && keyConsent.boat.display_name ? ' for "' + keyConsent.boat.display_name + '"' : '') +
-        '. Nothing is sent until you approve.',
-      submitLabel: 'Agree and connect',
-      onSubmit: submitConfirm,
-      onBack: () => setKeyConsent(null)
-    })
   } else if (preview && step === 'consent') {
     connection = h(ConsentForm, {
       consent: preview.consent,
@@ -393,7 +412,11 @@ export default function PluginConfigurationPanel (props) {
         h('div', { className: 'col-sm-8' },
           h('input', {
             id: 'yey-id-' + k,
+            name: 'yey-boat-' + k,
             className: 'form-control form-control-sm',
+            autoComplete: 'off',
+            'data-lpignore': 'true',
+            'data-1p-ignore': 'true',
             type,
             step: type === 'number' ? 'any' : undefined,
             value: identity[k] || '',
@@ -405,21 +428,22 @@ export default function PluginConfigurationPanel (props) {
         ' ',
         h('button', { type: 'button', className: 'btn btn-link', disabled: busy, onClick: () => setPreview(null) }, 'Back')))
   } else {
-    connection = h('form', { onSubmit: onConnect },
+    // autoComplete off, a field name that is not "url"/"username", type text
+    // (not url) and the password-manager opt-outs: Chrome used to fill the
+    // SignalK admin login into this form ("adminhttps://…"). The connector
+    // also cleans such a value up (lib/connection.normalizeConnectionInput).
+    connection = h('form', { onSubmit: onConnect, autoComplete: 'off' },
       h('p', { className: 'small' },
         'On ',
-        h('a', { href: DEFAULT_ORIGIN + '/account?source=plugin', target: '_blank', rel: 'noopener noreferrer' }, 'yey.boats'),
-        ', open Account → Connect a SignalK server and copy the link.'),
-      field('yey-url', 'Connection URL',
+        h('a', { href: DEFAULT_ORIGIN + '/account/boats/new?source=plugin', target: '_blank', rel: 'noopener noreferrer' }, 'yey.boats'),
+        ', open Add a boat and copy the link (or the code).'),
+      field('yey-url', 'Connection link',
         h('input', {
-          id: 'yey-url', className: 'form-control', type: 'url', required: true,
+          id: 'yey-url', name: 'yey-connection-link', className: 'form-control', type: 'text', required: true,
+          inputMode: 'url', autoComplete: 'off', autoCapitalize: 'off', autoCorrect: 'off', spellCheck: false,
+          'data-lpignore': 'true', 'data-1p-ignore': 'true', 'data-form-type': 'other',
           placeholder: 'https://yey.boats/c/ABC-DEF-GHJ', value: url,
           onChange: (e) => setUrl(e.target.value)
-        })),
-      field('yey-key', 'Key (only if yey.boats gave you one)',
-        h('input', {
-          id: 'yey-key', className: 'form-control', type: 'password', autoComplete: 'off',
-          placeholder: 'yk1.…', value: key, onChange: (e) => setKey(e.target.value)
         })),
       stopped ? h('p', { className: 'small text-muted' }, 'The connector is switched off; Connect switches it on.') : null,
       h('button', { type: 'submit', className: 'btn btn-primary', disabled: busy || !url.trim() },
