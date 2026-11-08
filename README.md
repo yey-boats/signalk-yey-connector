@@ -5,6 +5,14 @@ It sends the values a subscription plan asks for, over a connection the boat ope
 itself, and answers to a plan you manage on the web rather than to code you have to
 redeploy.
 
+## See it working (5 min, with sound)
+
+[![Watch: connect a SignalK boat to yey.boats, end to end](https://yey.boats/media/yey-onboarding.jpg)](https://yey.boats/setup#video)
+
+A new boat from start to finish: add it on yey.boats, install this plugin, paste the link,
+approve what it shares, then chat about the boat. Narrated, with captions.
+[Watch on yey.boats](https://yey.boats/setup#video) · [MP4](https://yey.boats/media/yey-onboarding.mp4)
+
 ## What it costs
 
 $0.99 per month plus VAT for the base plan. Bring your own Claude API key (BYOK) and
