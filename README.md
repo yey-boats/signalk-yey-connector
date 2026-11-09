@@ -99,8 +99,10 @@ GitHub.
 
    (Already downloaded it elsewhere? `npm install /path/to/signalk-yey-connector-<version>.tgz`.)
 3. Restart SignalK (**Restart** in the admin UI, or `sudo systemctl restart signalk`),
-   then **reload the admin page** in your browser. Until you reload, the plugin panel
-   says "Module signalk-yey-connector is not available".
+   then **hard-reload the admin page** in your browser: Ctrl+Shift+R (Chrome, Edge,
+   Firefox), Cmd+Shift+R on a Mac, or Cmd+Option+R in Safari. A normal reload can keep
+   the old, cached plugin page; until you hard-reload, the panel may say "Module
+   signalk-yey-connector is not available" or show an older version's settings.
 
 The plugin then appears under **Server → Plugin Config** as "yey — cloud connector",
 with its own connection panel. To update, do the same with the newer release.
