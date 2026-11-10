@@ -87,7 +87,7 @@ module.exports = function signalkYeyConnectorPlugin (app) {
           description:
             'Turns "Allow remote steering" off this many hours after it was turned on. ' +
             'Every remote steering command, accepted or refused, is also logged in the ' +
-            'plugin data folder (yey-steering-audit.jsonl).',
+            'plugin data folder (yey-steering-audit.jsonl; refusals in yey-steering-refusals.jsonl).',
           default: 0,
           minimum: 0
         },
