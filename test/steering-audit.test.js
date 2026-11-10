@@ -413,19 +413,24 @@ test('runtime: auto-off keeps the key in the options when the credential is not 
     options: { remote_steering: true, remote_steering_auto_off_hours: 1, key: `yk1.b_1.${secret}`,
       boatId: 'b_1', boatCredential: secret, cloudOrigin: 'https://yey.boats' }
   })
+  // No data dir: the auto-off start time cannot be kept, so remote steering
+  // stays off from the start (#39) and nothing rewrites the options.
+  assert.equal(h.rpcOpts().remoteSteering(), false)
   clock.t = T0 + 2 * 3600e3
   assert.equal(h.rpcOpts().remoteSteering(), false)
-  const last = h.saved[h.saved.length - 1]
-  assert.equal(last.remote_steering, false)
   // Nothing durable holds the credential: dropping the key would disconnect the
   // boat for good on the next restart.
-  assert.equal(last.key, `yk1.b_1.${secret}`)
+  for (const o of h.saved) assert.equal(o.key, `yk1.b_1.${secret}`)
 })
 
 test('runtime: auto-off keeps the key when the data dir is read-only', (t) => {
   if (process.platform === 'win32' || (process.getuid && process.getuid() === 0)) return t.skip('needs a non-root POSIX user')
   const clock = { t: T0 }
   const dir = tmp()
+  // Writable when steering was switched on (else it stays off, #39), then
+  // read-only by the time auto-off fires.
+  const options = { remote_steering: true, remote_steering_auto_off_hours: 1 }
+  runtimeWith({ dir, clock, options })
   fs.chmodSync(dir, 0o500)
   try {
     const h = runtimeWith({
