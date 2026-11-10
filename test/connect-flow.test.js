@@ -603,3 +603,19 @@ test('without allow_custom_origin there is no origin warning, and yey.boats is t
   const out = await h.runtime.resolveConnection({ url: URL_CODE })
   assert.equal(out.origin_trusted, true)
 })
+
+test('a http://yey.local link resolves trusted but flagged local, not encrypted (#25 review)', async () => {
+  const LOCAL = 'http://yey.local/c/ABC-DEF-GHJ'
+  const doc = {
+    ...DOC,
+    pair_url: 'http://yey.local/api/integrations/bundles/home/demo/signalk@2026-06-05/public/signalk_boat_pair',
+    routing: { ...DOC.routing, origin: 'http://yey.local' }
+  }
+  const h = harness({ docs: { [LOCAL]: [200, doc] } })
+  const out = await h.runtime.resolveConnection({ url: LOCAL })
+  assert.equal(out.origin_trusted, true)
+  assert.equal(out.origin_unencrypted, true)
+  assert.equal(h.runtime.snapshot().connection.origin_unencrypted, true)
+  const h2 = harness()
+  assert.equal((await h2.runtime.resolveConnection({ url: URL_CODE })).origin_unencrypted, false)
+})

@@ -228,3 +228,27 @@ test('fetch: with allowCustomOrigin a custom https origin connects', async () =>
     { fetchImpl: fakeFetch(200, custom), allowCustomOrigin: true })
   assert.equal(doc.routing.origin, 'https://boats.example.org')
 })
+
+test('fetch: a yey.boats link that redirects to another site is refused (#25 review)', async () => {
+  const redirected = (finalUrl) => async () => ({
+    status: 200, ok: true, url: finalUrl, text: async () => JSON.stringify(DOC)
+  })
+  await rejectsWith(fetchConnectionDocument('https://yey.boats/c/ABC-DEF-GHJ',
+    { fetchImpl: redirected('https://evil.example/c/ABC-DEF-GHJ') }), 'origin_not_allowed')
+  await rejectsWith(fetchConnectionDocument('https://yey.boats/c/ABC-DEF-GHJ',
+    { fetchImpl: redirected('http://yey.boats/c/ABC-DEF-GHJ') }), 'insecure_origin')
+  // A redirect inside yey.boats is fine.
+  const doc = await fetchConnectionDocument('https://yey.boats/c/ABC-DEF-GHJ',
+    { fetchImpl: redirected('https://my.yey.boats/c/ABC-DEF-GHJ') })
+  assert.equal(doc.routing.origin, 'https://yey.boats')
+})
+
+test('isUnencryptedOrigin: only http:// local hosts', () => {
+  const { isUnencryptedOrigin } = require('../lib/connection')
+  assert.equal(isUnencryptedOrigin('http://yey.local'), true)
+  assert.equal(isUnencryptedOrigin('http://localhost:3000'), true)
+  assert.equal(isUnencryptedOrigin('https://yey.local'), false)
+  assert.equal(isUnencryptedOrigin('https://yey.boats'), false)
+  assert.equal(isUnencryptedOrigin('http://evil.example'), false)
+  assert.equal(isUnencryptedOrigin(''), false)
+})

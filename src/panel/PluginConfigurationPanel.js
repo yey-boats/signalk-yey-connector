@@ -381,6 +381,7 @@ export default function PluginConfigurationPanel (props) {
         : h('p', { className: 'mb-1' },
           h('strong', null, 'Connected to '),
           h('a', { href: origin, target: '_blank', rel: 'noopener noreferrer' }, origin.replace(/^https?:\/\//, '')),
+          conn.origin_unencrypted ? ' (local, not encrypted)' : null,
           conn.display_name ? h('strong', null, ' as ' + conn.display_name) : null,
           ' ',
           h('button', {
@@ -407,7 +408,9 @@ export default function PluginConfigurationPanel (props) {
       consent: preview.consent,
       deny: denyList,
       busy,
-      intro: 'Nothing is sent until you approve.',
+      intro: 'Nothing is sent until you approve.' + (preview.origin_unencrypted
+        ? ' This link is local (' + preview.origin + '), not encrypted: only use it on your own boat network.'
+        : ''),
       submitLabel: 'Agree and connect',
       onSubmit: submitConfirm,
       onBack: () => setStep('identity')
@@ -418,6 +421,11 @@ export default function PluginConfigurationPanel (props) {
         ? h('div', { className: 'alert alert-danger', role: 'alert' },
           h('strong', null, 'This link is from ' + preview.origin + ', not yey.boats. '),
           'Continuing sends this boat\'s details and data to that site. Only continue if you run it yourself.')
+        : null,
+      preview.origin_unencrypted
+        ? h('div', { className: 'alert alert-warning', role: 'alert' },
+          h('strong', null, preview.origin + ' is local, not encrypted. '),
+          'The boat\'s details and data travel in the clear on this network. Only continue on your own boat network.')
         : null,
       h('h6', null, 'Is this your boat?'),
       h('p', { className: 'small text-muted' },

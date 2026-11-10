@@ -143,3 +143,24 @@ test('a bundle-level {ok:false,error} is returned, not thrown', async () => {
     server.close()
   }
 })
+
+test('callPublicOp refuses a redirect: the credential body is never re-POSTed elsewhere (#25 review)', async () => {
+  let foreignHits = 0
+  const foreign = await serve((req, res) => {
+    foreignHits += 1
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(ENVELOPE))
+  })
+  const { server, origin } = await serve((req, res) => {
+    res.writeHead(307, { location: foreign.origin + req.url })
+    res.end()
+  })
+  try {
+    await assert.rejects(() => callPublicOp({ ...CFG, cloudOrigin: origin }, 'signalk_boat_pair',
+      { boat_credential: 'bk_secret' }))
+    assert.equal(foreignHits, 0)
+  } finally {
+    server.close()
+    foreign.server.close()
+  }
+})
