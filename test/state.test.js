@@ -64,3 +64,33 @@ test('an unwritable data directory degrades instead of throwing out of pairing',
   })
   assert.doesNotThrow(() => s.write({ boat_id: 'b_1' }))
 })
+
+// The state file holds the boat credential: it must not be world-readable on a
+// shared SignalK host (#24).
+const modeOf = (file) => fs.statSync(file).mode & 0o777
+
+test('the credential file is written owner-only (0600)', { skip: process.platform === 'win32' }, () => {
+  const dir = tmp()
+  const s = createState({ dir })
+  s.write({ boat_id: 'b_1', boat_credential: 'bk_x' })
+  assert.equal(modeOf(s.file), 0o600)
+})
+
+test('a stale tmp sibling does not leak its looser mode into the credential file', { skip: process.platform === 'win32' }, () => {
+  const dir = tmp()
+  const s = createState({ dir })
+  fs.writeFileSync(`${s.file}.tmp`, '{}', { mode: 0o644 })
+  fs.chmodSync(`${s.file}.tmp`, 0o644)
+  s.write({ boat_credential: 'bk_x' })
+  assert.equal(modeOf(s.file), 0o600)
+})
+
+test('an existing world-readable credential file is tightened to 0600 on start', { skip: process.platform === 'win32' }, () => {
+  const dir = tmp()
+  const file = path.join(dir, 'yey-connector-state.json')
+  fs.writeFileSync(file, JSON.stringify({ boat_credential: 'bk_x' }))
+  fs.chmodSync(file, 0o644)
+  const s = createState({ dir })
+  assert.equal(modeOf(file), 0o600)
+  assert.equal(s.read().boat_credential, 'bk_x')
+})

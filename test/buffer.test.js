@@ -259,3 +259,26 @@ test('a failed write is counted, not thrown out of the delta handler', () => {
   assert.ok(b.stats().write_errors > 0)
   assert.equal(b.stats().persistent, true)
 })
+
+// Buffered records are the boat's track: owner-only, like the credential (#24).
+const modeOf = (file) => fs.statSync(file).mode & 0o777
+
+test('lane files are written owner-only (0600)', { skip: process.platform === 'win32' }, () => {
+  const dir = tmp()
+  const b = createBuffer({ dir, now: () => 0 })
+  b.append(rec(1, 'high'))
+  b.append(rec(2, 'low'))
+  assert.equal(modeOf(path.join(dir, 'buffer', 'high.jsonl')), 0o600)
+  assert.equal(modeOf(path.join(dir, 'buffer', 'low.jsonl')), 0o600)
+})
+
+test('existing world-readable lane files are tightened to 0600 on start', { skip: process.platform === 'win32' }, () => {
+  const dir = tmp()
+  fs.mkdirSync(path.join(dir, 'buffer'))
+  const lane = path.join(dir, 'buffer', 'normal.jsonl')
+  fs.writeFileSync(lane, `${JSON.stringify(rec(1, 'normal'))}\n`)
+  fs.chmodSync(lane, 0o644)
+  const b = createBuffer({ dir, now: () => 0 })
+  assert.equal(modeOf(lane), 0o600)
+  assert.equal(b.stats().count, 1)
+})
