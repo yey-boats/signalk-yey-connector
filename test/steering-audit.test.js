@@ -9,7 +9,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
-const { createSteeringAudit, AUDIT_FILE } = require('../lib/steering-audit')
+const { createSteeringAudit, AUDIT_FILE, REFUSALS_FILE } = require('../lib/steering-audit')
 const { createRpcServer, REFUSAL, REQUEST_EVENT, REQUEST_SCHEMA } = require('../lib/rpc')
 const { createRuntime } = require('../lib/runtime')
 
@@ -26,12 +26,19 @@ test('audit: one JSON line per record, in the data dir, owner-only (0600)', () =
   audit.record({ request_id: 'rpc_2', path: 'steering.autopilot.state', value: 'standby', outcome: 'refused', error: 'rate_limited' })
   const file = path.join(dir, AUDIT_FILE)
   assert.equal(audit.file, file)
+  // Accepted puts in the audit file; refusals in their own file (#33).
   const lines = readLines(file)
-  assert.equal(lines.length, 2)
+  assert.equal(lines.length, 1)
   assert.deepEqual(lines[0], { t: new Date(T0).toISOString(), request_id: 'rpc_1',
     path: 'steering.autopilot.state', value: 'auto', outcome: 'accepted' })
-  assert.equal(lines[1].error, 'rate_limited')
-  if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+  const refusals = readLines(path.join(dir, REFUSALS_FILE))
+  assert.equal(refusals.length, 1)
+  assert.equal(refusals[0].error, 'rate_limited')
+  assert.deepEqual(audit.recent(5).map((r) => r.request_id), ['rpc_1', 'rpc_2'])
+  if (process.platform !== 'win32') {
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+    assert.equal(fs.statSync(path.join(dir, REFUSALS_FILE)).mode & 0o777, 0o600)
+  }
 })
 
 test('audit: a file left with a wider mode is tightened on the next write', () => {
@@ -285,7 +292,7 @@ function floodRpc ({ dir, clock, timers = [], limits }) {
   return { rpc, audit }
 }
 
-const allRecords = (dir) => fs.readdirSync(dir).filter((f) => f.startsWith(AUDIT_FILE))
+const allRecords = (dir) => fs.readdirSync(dir).filter((f) => f.startsWith(AUDIT_FILE) || f.startsWith(REFUSALS_FILE))
   .flatMap((f) => readLines(path.join(dir, f)))
 
 test('rpc: a refusal flood cannot flush an accepted put out of the audit log', async () => {
@@ -361,4 +368,118 @@ test('rpc: puts dropped for a bad schema/id or another boat are audited as dropp
   assert.deepEqual(records.map((r) => [r.outcome, r.error]),
     [['dropped', 'bad_schema'], ['dropped', 'bad_id'], ['dropped', 'foreign_boat']])
   assert.equal(records[1].request_id, 'bad id')
+})
+
+// ── #33 follow-ups ───────────────────────────────────────────────────────────
+
+test('audit: a sustained refusal flood can never rotate an accepted record out (#33)', () => {
+  const dir = tmp()
+  let t = T0
+  const audit = createSteeringAudit({ dir, now: () => t, maxBytes: 2000, keep: 1 })
+  audit.record({ request_id: 'rpc_ok', path: 'steering.autopilot.state', value: 'auto', outcome: 'accepted' })
+  audit.record({ request_id: 'rpc_to', path: 'steering.autopilot.state', value: 'wind', outcome: 'timeout', error: 'timeout' })
+  audit.record({ path: null, outcome: 'auto_off', detail: 'remote_steering_auto_off_hours=2' })
+  // Hours of refusals at the per-minute cap, plus suppressed and dropped lines.
+  for (let i = 0; i < 2000; i++) {
+    t += 2000
+    audit.record({ request_id: `rpc_r${i}`, path: 'steering.rudderAngle', value: 0.1, outcome: i % 3 ? 'refused' : 'dropped', error: 'not_permitted' })
+    if (i % 30 === 0) audit.record({ path: null, outcome: 'suppressed', detail: 'n=30' })
+  }
+  const kept = fs.readdirSync(dir).filter((f) => f.startsWith(AUDIT_FILE)).flatMap((f) => readLines(path.join(dir, f)))
+  assert.deepEqual(kept.map((r) => r.outcome), ['accepted', 'timeout', 'auto_off'])
+  // The refusals rotate on their own, under the same cap.
+  const names = fs.readdirSync(dir).sort()
+  assert.deepEqual(names, [AUDIT_FILE, REFUSALS_FILE, `${REFUSALS_FILE}.1`])
+  for (const n of names) assert.ok(fs.statSync(path.join(dir, n)).size <= 2000, n)
+  // recent() still interleaves both, newest last.
+  const recent = audit.recent(3)
+  assert.equal(recent.length, 3)
+  assert.equal(recent[2].request_id, 'rpc_r1999')
+})
+
+test('audit: a late outcome of a timed-out put is kept with the accepted records', () => {
+  const dir = tmp()
+  const audit = createSteeringAudit({ dir, now: () => T0 })
+  audit.record({ request_id: 'rpc_1', path: 'steering.autopilot.state', value: 'auto', outcome: 'refused', error: 'signalk_refused', detail: 'after_timeout: statusCode 502' })
+  assert.equal(readLines(path.join(dir, AUDIT_FILE))[0].detail, 'after_timeout: statusCode 502')
+})
+
+test('runtime: auto-off keeps the key in the options when the credential is not on disk (no data dir, #33)', () => {
+  const clock = { t: T0 }
+  const secret = 'supersecretcredential'
+  const h = runtimeWith({
+    dir: null,
+    clock,
+    options: { remote_steering: true, remote_steering_auto_off_hours: 1, key: `yk1.b_1.${secret}`,
+      boatId: 'b_1', boatCredential: secret, cloudOrigin: 'https://yey.boats' }
+  })
+  clock.t = T0 + 2 * 3600e3
+  assert.equal(h.rpcOpts().remoteSteering(), false)
+  const last = h.saved[h.saved.length - 1]
+  assert.equal(last.remote_steering, false)
+  // Nothing durable holds the credential: dropping the key would disconnect the
+  // boat for good on the next restart.
+  assert.equal(last.key, `yk1.b_1.${secret}`)
+})
+
+test('runtime: auto-off keeps the key when the data dir is read-only', (t) => {
+  if (process.platform === 'win32' || (process.getuid && process.getuid() === 0)) return t.skip('needs a non-root POSIX user')
+  const clock = { t: T0 }
+  const dir = tmp()
+  fs.chmodSync(dir, 0o500)
+  try {
+    const h = runtimeWith({
+      dir,
+      clock,
+      options: { remote_steering: true, remote_steering_auto_off_hours: 1, key: 'yk1.b_1.x',
+        boatId: 'b_1', boatCredential: 'x', cloudOrigin: 'https://yey.boats' }
+    })
+    clock.t = T0 + 2 * 3600e3
+    assert.equal(h.rpcOpts().remoteSteering(), false)
+    assert.equal(h.saved[h.saved.length - 1].key, 'yk1.b_1.x')
+  } finally {
+    fs.chmodSync(dir, 0o700)
+  }
+})
+
+test('rpc: stop() flushes a pending suppressed count (#33)', async () => {
+  const records = []
+  const cleared = []
+  const rpc = createRpcServer({
+    app: { putSelfPath: () => Promise.resolve({ state: 'COMPLETED', statusCode: 200 }) },
+    publish: async () => {},
+    boatId: () => 'b_1',
+    now: () => T0,
+    remoteSteering: () => true,
+    setTimer: () => 'tmr',
+    clearTimer: (h) => cleared.push(h),
+    audit: (e) => records.push(e)
+  })
+  for (let i = 0; i < 35; i++) await rpc.handle(put('steering.rudderAngle', 0.1))
+  assert.equal(records.filter((r) => r.outcome === 'suppressed').length, 0)
+  const before = cleared.length
+  rpc.stop()
+  assert.deepEqual(records.slice(-1).map((r) => [r.outcome, r.detail]), [['suppressed', 'n=5']])
+  assert.equal(cleared.length, before + 1, 'the suppression timer is disarmed')
+  rpc.stop()   // idempotent: nothing more to write
+  assert.equal(records.filter((r) => r.outcome === 'suppressed').length, 1)
+})
+
+test('runtime: plugin stop stops the rpc server (the suppressed count is not lost)', () => {
+  const clock = { t: T0 }
+  let stopped = 0
+  const runtime = createRuntime({
+    app: { debug: () => {}, getDataDirPath: () => tmp(), setPluginStatus: () => {}, savePluginOptions: () => {} },
+    version: '9.9.9',
+    options: { remote_steering: true },
+    deps: {
+      now: () => clock.t,
+      setTimeout: () => 1,
+      clearTimeout: () => {},
+      createRpcServer: (o) => ({ ...require('../lib/rpc').createRpcServer(o), stop: () => { stopped += 1 } }),
+      source: { subscribe: () => ({ close: () => {} }), selfTree: async () => ({}) }
+    }
+  })
+  runtime.stop()
+  assert.equal(stopped, 1)
 })
