@@ -53,16 +53,36 @@ jobs:
         with:
           path: connector
 
+      # The bundle is not public, so this job needs NAVIGATOR_READ_TOKEN. Fork
+      # PRs never get secrets: there the check is skipped with a warning (a known
+      # gap). Everywhere else — push to main, PRs from this repo — a missing
+      # token FAILS the job: a contract check that silently stops running is
+      # indistinguishable from one that passes.
+      - name: Require the navigator token (skip only on forks)
+        id: gate
+        env:
+          HAS_TOKEN: ${{ secrets.NAVIGATOR_READ_TOKEN != '' }}
+          IS_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          if [ "$HAS_TOKEN" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$IS_FORK" = "true" ]; then
+            echo "::warning::Cross-repo contract check SKIPPED on a fork PR (no secrets)."
+            echo "::warning::The etag agreement with boat_plan.py is UNVERIFIED on this run."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::NAVIGATOR_READ_TOKEN is not set, so the cross-repo contract"
+            echo "::error::check cannot run. Add a read-only token for yey-boats/navigator"
+            echo "::error::as the NAVIGATOR_READ_TOKEN Actions secret."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
         with:
           repository: yey-boats/navigator
           path: navigator
-          # The bundle is not public; without a token this job is skipped rather
-          # than silently green. A skipped contract check is a known gap, a
-          # falsely-green one is a lie.
           token: ${{ secrets.NAVIGATOR_READ_TOKEN }}
-        continue-on-error: true
-        id: checkout_bundle
 
       - uses: actions/setup-node@v4
         with:
@@ -77,16 +97,8 @@ jobs:
         run: npm ci || npm install
 
       - name: Contract tests against the real bundle
-        if: steps.checkout_bundle.outcome == 'success'
+        if: steps.gate.outputs.run == 'true'
         working-directory: connector
         env:
           YEY_BUNDLE_PATH: ${{ github.workspace }}/navigator
         run: npm test
-
-      - name: Report a skipped contract check
-        if: steps.checkout_bundle.outcome != 'success'
-        run: |
-          echo "::warning::Cross-repo contract check SKIPPED — could not check out"
-          echo "::warning::yey-boats/navigator. The etag agreement between this"
-          echo "::warning::connector and boat_plan.py is therefore UNVERIFIED on"
-          echo "::warning::this run. Set NAVIGATOR_READ_TOKEN to enable it."
