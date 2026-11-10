@@ -242,3 +242,123 @@ test('rpc: a put dropped unanswered (expired or a duplicate id) is audited as dr
   assert.deepEqual(records.map((r) => [r.outcome, r.error]),
     [['accepted', undefined], ['dropped', 'duplicate'], ['dropped', 'expired']])
 })
+
+// ── review fixes ─────────────────────────────────────────────────────────────
+
+test('runtime: auto-off never writes the credential key back into the options file', () => {
+  const clock = { t: T0 }
+  const secret = 'supersecretcredential'
+  const h = runtimeWith({
+    clock,
+    options: { remote_steering: true, remote_steering_auto_off_hours: 1, key: `yk1.b_1.${secret}`,
+      boatId: 'b_1', boatCredential: secret, cloudOrigin: 'https://yey.boats' }
+  })
+  clock.t = T0 + 2 * 3600e3
+  assert.equal(h.rpcOpts().remoteSteering(), false)
+  const last = h.saved[h.saved.length - 1]
+  assert.equal(last.remote_steering, false)
+  assert.equal('key' in last, false)
+  for (const o of h.saved) assert.equal(JSON.stringify(o).includes(secret), false, JSON.stringify(o))
+})
+
+test('runtime: a key that has not connected yet stays in the options on auto-off', () => {
+  const clock = { t: T0 }
+  const h = runtimeWith({ clock, options: { remote_steering: true, remote_steering_auto_off_hours: 1, key: 'yk1.b_1.x' } })
+  clock.t = T0 + 2 * 3600e3
+  assert.equal(h.rpcOpts().remoteSteering(), false)
+  assert.equal(h.saved.pop().key, 'yk1.b_1.x')
+})
+
+function floodRpc ({ dir, clock, timers = [], limits }) {
+  const audit = createSteeringAudit({ dir, now: () => clock.t })
+  const rpc = createRpcServer({
+    app: { putSelfPath: () => Promise.resolve({ state: 'COMPLETED', statusCode: 200 }) },
+    publish: async () => {},
+    boatId: () => 'b_1',
+    now: () => clock.t,
+    remoteSteering: () => true,
+    setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length },
+    clearTimer: () => {},
+    limits,
+    audit: (e) => audit.record(e)
+  })
+  return { rpc, audit }
+}
+
+const allRecords = (dir) => fs.readdirSync(dir).filter((f) => f.startsWith(AUDIT_FILE))
+  .flatMap((f) => readLines(path.join(dir, f)))
+
+test('rpc: a refusal flood cannot flush an accepted put out of the audit log', async () => {
+  const dir = tmp()
+  const clock = { t: T0 }
+  const { rpc } = floodRpc({ dir, clock })
+  const first = put('steering.autopilot.state', 'auto')
+  assert.equal((await rpc.handle(first)).ok, true)
+  for (let i = 0; i < 6000; i++) {
+    clock.t += 1          // ~6 s of refusals
+    await rpc.handle(put('steering.autopilot.state', 'standby'))
+  }
+  const rows = allRecords(dir)
+  assert.ok(rows.some((r) => r.request_id === first.data.id && r.outcome === 'accepted'),
+    'the accepted put is still in the log')
+  assert.ok(rows.filter((r) => r.outcome !== 'accepted').length <= 30 + 1)
+})
+
+test('rpc: suppressed refusals are counted in one record per window; accepted puts are never suppressed', async () => {
+  const dir = tmp()
+  const clock = { t: T0 }
+  const timers = []
+  // A high request rate, so the accepted put is not itself rate limited.
+  const { rpc } = floodRpc({ dir, clock, timers, limits: { max_per_min: 1000 } })
+  const refusedPut = () => put('steering.rudderAngle', 0.1)   // not_permitted
+  for (let i = 0; i < 100; i++) await rpc.handle(refusedPut())
+  // An accepted put in the middle of the flood is still written.
+  const ok = put('steering.autopilot.state', 'auto')
+  assert.equal((await rpc.handle(ok)).ok, true)
+  let rows = allRecords(dir)
+  assert.equal(rows.filter((r) => r.outcome === 'refused').length, 30)
+  assert.ok(rows.some((r) => r.request_id === ok.data.id && r.outcome === 'accepted'))
+  assert.equal(rows.filter((r) => r.outcome === 'suppressed').length, 0)
+  // The window ends: one suppressed record with the count.
+  clock.t = T0 + 60e3
+  timers.filter((t) => t.ms >= 1000).forEach((t) => t.fn())
+  rows = allRecords(dir)
+  const sup = rows.filter((r) => r.outcome === 'suppressed')
+  assert.equal(sup.length, 1)
+  assert.equal(sup[0].detail, 'n=70')
+  // A new window audits refusals again.
+  await rpc.handle(refusedPut())
+  assert.equal(allRecords(dir).filter((r) => r.outcome === 'refused').length, 31)
+})
+
+test('rpc: the suppressed count is written by the next put even if no timer fires', async () => {
+  const records = []
+  const clock = { t: T0 }
+  const rpc = createRpcServer({
+    app: { putSelfPath: () => Promise.resolve({ state: 'COMPLETED', statusCode: 200 }) },
+    publish: async () => {},
+    boatId: () => 'b_1',
+    now: () => clock.t,
+    remoteSteering: () => true,
+    setTimer: () => 1,
+    clearTimer: () => {},
+    audit: (e) => records.push(e)
+  })
+  for (let i = 0; i < 35; i++) await rpc.handle(put('steering.rudderAngle', 0.1))
+  clock.t = T0 + 61e3
+  await rpc.handle(put('steering.rudderAngle', 0.1))
+  assert.deepEqual(records.slice(-2).map((r) => [r.outcome, r.detail]),
+    [['suppressed', 'n=5'], ['refused', undefined]])
+})
+
+test('rpc: puts dropped for a bad schema/id or another boat are audited as dropped', async () => {
+  const { rpc, records } = rpcWith()
+  const env = put('steering.autopilot.state', 'auto')
+  await rpc.handle({ ...env, data: { ...env.data, schema: 'nope' } })
+  await rpc.handle({ ...env, data: { ...env.data, id: 'bad id' } })
+  await rpc.handle({ ...env, data: { ...env.data, boat_id: 'b_other' } })
+  await rpc.handle({ ...env, data: { ...env.data, op: 'get', boat_id: 'b_other' } })   // not a put: not audited
+  assert.deepEqual(records.map((r) => [r.outcome, r.error]),
+    [['dropped', 'bad_schema'], ['dropped', 'bad_id'], ['dropped', 'foreign_boat']])
+  assert.equal(records[1].request_id, 'bad id')
+})
