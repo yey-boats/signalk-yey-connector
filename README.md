@@ -233,13 +233,16 @@ and your own autopilot plugin carries them out.
 - At most 12 commands a minute. Every command, carried out or refused, is written to the
   server log (debug) and shown as the plugin status, for example
   `Remote steering: steering.autopilot.state=auto accepted 12:03`.
-- **Audit log.** Every command is also appended to `yey-steering-audit.jsonl` in the
-  plugin's data folder (owner-only, mode 0600): time, request id, path, value and the
-  outcome (`accepted`, `refused` with the reason, `timeout`, `dropped`, and `auto_off`).
-  It rotates at 256 KB, keeping three old files (`.1`–`.3`). Refused and dropped commands
-  are logged up to 30 a minute; beyond that one `suppressed` line counts the rest, so a
-  flood cannot push the accepted commands out of the log. Accepted commands, timeouts and
-  auto-off are always logged. The panel shows the last ten under **Advanced**.
+- **Audit log.** Every command is also logged in the plugin's data folder (owner-only,
+  mode 0600), one JSON line each: time, request id, path, value and the outcome.
+  What happened (`accepted`, `timeout`, what a timed-out command finally did, and
+  `auto_off`) goes to `yey-steering-audit.jsonl`; what did not (`refused` with the
+  reason, `dropped`, `suppressed`) goes to `yey-steering-refusals.jsonl`. Each file
+  rotates on its own at 256 KB, keeping three old files (`.1`–`.3`), so no flood of
+  refusals can push an accepted command out of the log. Refused and dropped commands are
+  logged up to 30 a minute; beyond that one `suppressed` line counts the rest (written
+  when the minute ends, or when the plugin stops). The panel shows the last ten under
+  **Advanced**.
 - **Auto-off (optional).** Set *Switch remote steering off after (hours)* (option
   `remote_steering_auto_off_hours`, default 0 = never) and the plugin unticks the switch
   that many hours after it was turned on. The time survives restarts. The plugin status
