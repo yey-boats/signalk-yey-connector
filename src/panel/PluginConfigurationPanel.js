@@ -137,6 +137,21 @@ function steeringAutoOffNote (auto) {
   return parts.join(' ')
 }
 
+/** Why remote steering is not working although it is ticked (#39): kept off
+ *  because auto-off cannot be kept across restarts, or puts refused because
+ *  the boat clock looks wrong. */
+function steeringWarnings (status) {
+  const s = status || {}
+  const auto = s.remote_steering_auto_off || {}
+  const clock = s.rpc && s.rpc.clock_problem
+  const lines = []
+  if (auto.problem_text) lines.push('Remote steering is off: ' + auto.problem_text)
+  if (clock && clock.text) lines.push(clock.text + ' (' + when(clock.at) + ')')
+  if (!lines.length) return null
+  return h('div', { className: 'alert alert-warning small py-2' },
+    lines.map((l, i) => h('div', { key: i }, l)))
+}
+
 /** The last remote steering commands, newest first (#22). The full log is
  *  yey-steering-audit.jsonl in the plugin data folder. */
 function steeringLog (rows) {
@@ -539,6 +554,7 @@ export default function PluginConfigurationPanel (props) {
             style: { maxWidth: 120 }, value: autoOffHours, onChange: (e) => setAutoOffHours(e.target.value)
           }),
           steeringAutoOffNote(status && status.remote_steering_auto_off)),
+        steeringWarnings(status),
         steeringLog(status && status.steering_log),
         h('button', { type: 'submit', className: 'btn btn-secondary btn-sm' }, 'Save'),
         savedNote ? h('span', { className: 'ms-2 small text-success' }, savedNote) : null)),

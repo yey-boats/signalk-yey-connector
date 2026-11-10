@@ -24,6 +24,12 @@ section for that version below becomes the GitHub release notes.
   put that fails after its timeout is audited, and
   `steering.autopilot.actions.advanceWaypoint` (value `1`, as the SignalK
   autopilot plugin handles it) is allowed (#36, fixes #35).
+- Remote steering auto-off fails closed: when the time steering was switched
+  on cannot be saved (read-only or missing data folder), remote steering stays
+  off on start instead of restarting the auto-off clock on every restart, and
+  the status and panel say why. Puts refused as `deadline_too_far` or dropped
+  as `expired` now name a likely boat clock problem in the status and panel
+  (fixes #39).
 
 ### Added
 - Remote steering audit log (`yey-steering-audit.jsonl`, 0600, rotated) and

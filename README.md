@@ -246,8 +246,17 @@ and your own autopilot plugin carries them out.
   **Advanced**.
 - **Auto-off (optional).** Set *Switch remote steering off after (hours)* (option
   `remote_steering_auto_off_hours`, default 0 = never) and the plugin unticks the switch
-  that many hours after it was turned on. The time survives restarts. The plugin status
-  and the panel say when it will switch off or when it did.
+  that many hours after it was turned on. The time is kept in the plugin's data folder,
+  so it survives restarts. If that folder is missing or read-only, the time cannot be
+  kept, so with auto-off set remote steering **stays off** (fails closed) and the plugin
+  status and the panel say why; make the folder writable (or set auto-off to 0) and
+  restart the plugin. The plugin status and the panel say when it will switch off or
+  when it did.
+- **Boat clock.** Each command carries a deadline at most 15 s ahead. If the boat's clock
+  is off by more than about 10 s, commands are refused (`deadline_too_far`, clock slow)
+  or dropped (`expired`, clock fast), `standby` included. The plugin status and the panel
+  then say the boat clock looks wrong and by roughly how much: fix its time sync (NTP or
+  GPS time).
 - **To turn it off:** untick the setting under **Advanced** and press **Save** (the
   plugin restarts and refuses all commands), or switch it off in the yey.boats app, or
   switch the plugin off.
