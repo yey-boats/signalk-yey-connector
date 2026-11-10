@@ -83,7 +83,7 @@ function put (pathName, value, extra = {}) {
   seq += 1
   return { type: REQUEST_EVENT,
     data: { schema: REQUEST_SCHEMA, id: `rpc_${String(seq).padStart(24, 'b')}`, boat_id: 'b_1',
-      op: 'put', args: { path: pathName, value }, deadline_ms: 0, ...extra } }
+      op: 'put', args: { path: pathName, value }, deadline_ms: T0 + 4000, ...extra } }
 }
 
 function rpcWith ({ steering = true, clock = T0 } = {}) {
@@ -124,7 +124,7 @@ test('rpc: reads are not audited, and an audit sink that throws changes nothing'
   assert.equal(records.length, 0)
   const loud = createRpcServer({
     app: { putSelfPath: () => Promise.resolve({ state: 'COMPLETED', statusCode: 200 }) },
-    publish: async () => {}, now: () => T0, remoteSteering: true,
+    publish: async () => {}, now: () => T0, remoteSteering: true, boatId: () => 'b_1',
     audit: () => { throw new Error('disk full') }
   })
   assert.equal((await loud.handle(put('steering.autopilot.state', 'auto'))).ok, true)
@@ -296,7 +296,7 @@ test('rpc: a refusal flood cannot flush an accepted put out of the audit log', a
   assert.equal((await rpc.handle(first)).ok, true)
   for (let i = 0; i < 6000; i++) {
     clock.t += 1          // ~6 s of refusals
-    await rpc.handle(put('steering.autopilot.state', 'standby'))
+    await rpc.handle(put('steering.autopilot.state', 'standby', { deadline_ms: clock.t + 4000 }))
   }
   const rows = allRecords(dir)
   assert.ok(rows.some((r) => r.request_id === first.data.id && r.outcome === 'accepted'),
@@ -310,7 +310,7 @@ test('rpc: suppressed refusals are counted in one record per window; accepted pu
   const timers = []
   // A high request rate, so the accepted put is not itself rate limited.
   const { rpc } = floodRpc({ dir, clock, timers, limits: { max_per_min: 1000 } })
-  const refusedPut = () => put('steering.rudderAngle', 0.1)   // not_permitted
+  const refusedPut = () => put('steering.rudderAngle', 0.1, { deadline_ms: clock.t + 4000 })   // not_permitted
   for (let i = 0; i < 100; i++) await rpc.handle(refusedPut())
   // An accepted put in the middle of the flood is still written.
   const ok = put('steering.autopilot.state', 'auto')
@@ -346,7 +346,7 @@ test('rpc: the suppressed count is written by the next put even if no timer fire
   })
   for (let i = 0; i < 35; i++) await rpc.handle(put('steering.rudderAngle', 0.1))
   clock.t = T0 + 61e3
-  await rpc.handle(put('steering.rudderAngle', 0.1))
+  await rpc.handle(put('steering.rudderAngle', 0.1, { deadline_ms: clock.t + 4000 }))
   assert.deepEqual(records.slice(-2).map((r) => [r.outcome, r.detail]),
     [['suppressed', 'n=5'], ['refused', undefined]])
 })

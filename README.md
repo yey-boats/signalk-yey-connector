@@ -210,10 +210,24 @@ and your own autopilot plugin carries them out.
   steering from yey.boats*, option `remote_steering`) AND remote steering turned on in
   the yey.boats app, which asks for a code sent to your Telegram. The cloud cannot change
   the setting on the boat.
-- **Autopilot paths only:** `steering.autopilot.state`,
-  `steering.autopilot.target.headingTrue`, `steering.autopilot.target.windAngleApparent`
-  and `steering.autopilot.actions.<action>` (for example `adjustHeading`, `tack`). The
-  value must be a plain boolean, number or short string. Anything else is refused.
+- **One policy, checked on the boat** (`lib/steering-policy.js`, published to the cloud
+  and displays through the `capabilities` request as `remote_steering.policy`, version 1).
+  Anything outside it is refused, never adjusted:
+
+  | Path | Value |
+  |---|---|
+  | `steering.autopilot.state` | `standby`, `auto`, `wind`, `route`, `track`, `pretrack` |
+  | `steering.autopilot.target.headingTrue`, `.headingMagnetic` | radians, 0 to under 2π |
+  | `steering.autopilot.target.windAngleApparent` | radians, −π to π |
+  | `steering.autopilot.actions.adjustHeading` | degrees, −150 to 150 |
+  | `steering.autopilot.actions.tack` | `"port"`, `"starboard"` or `true` |
+  | `steering.autopilot.actions.advanceMode` | `true` |
+
+  Each command must name this boat (`boat_id`) and carry a deadline (`deadline_ms`, at
+  most 60 s ahead); a late one is dropped. Request ids are remembered in
+  `yey-steering-replay.json` in the plugin's data folder (mode 0600), so a replayed
+  command is dropped even after a restart. If a command times out, the reply carries the
+  path's current value and the log records what the autopilot finally did.
 - **Your deny list still wins:** add `steering.autopilot` under **Advanced** → *Never send
   these paths* to refuse every command whatever the switches say.
 - At most 12 commands a minute. Every command, carried out or refused, is written to the

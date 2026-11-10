@@ -1,0 +1,138 @@
+{
+  "_comment": "The six places the yey.boats stack decides what an autopilot command may be (#28 step 1). Read from source on 2026-11-10; refs are the commits read. Angles: SignalK carries radians; adjustHeading is the one path in degrees (signalk-autopilot / spec-16 convention). 'via_connector' says whether a command from that implementation can reach a boat through this connector. test/steering-policy.test.js checks lib/steering-policy.js against this table: every sample in 'emits' with via_connector=true must be accepted, every 'must_refuse' refused.",
+  "implementations": [
+    {
+      "id": "firmware",
+      "repo": "yey-boats/instruments",
+      "ref": "c4a967b85a",
+      "files": ["src/autopilot.cpp", "src/autopilot_pure.cpp", "src/ui/screen_autopilot.cpp", "src/knob_menu.cpp", "src/midl_render.cpp", "src/signalk.cpp"],
+      "role": "ESP32 display: PUTs straight to the boat's own SignalK over the LAN",
+      "via_connector": false,
+      "paths": [
+        { "path": "steering.autopilot.state", "type": "string", "values": ["standby", "auto", "wind", "pretrack", "track", "route"], "notes": "autopilot.cpp mode_name: standby|auto|wind|pretrack|track; screen_autopilot.cpp also sends route. Engage modes gated by Permissions.allow_engage (off by default), standby by allow_standby (on)." },
+        { "path": "steering.autopilot.actions.adjustHeading", "type": "integer", "unit": "deg", "min": -90, "max": 90, "clamp": "adjust_heading_deg refuses |delta|>90 (InvalidPayload); tack/gybe clamp_maneuver caps the computed turn to +-90 and a second tap finishes it", "notes": "gated by Permissions.allow_heading_adjust" },
+        { "path": "steering.autopilot.target.headingTrue", "type": "number", "unit": "rad", "min": 0, "max_exclusive": 6.283185307179586, "notes": "knob_menu wrap_2pi into [0,2pi); screen_autopilot put_heading %.4f" },
+        { "path": "notifications.silence", "type": "string", "values": ["silenced"], "notes": "alarm silence; not an autopilot path" },
+        { "path": "<any dotted MIDL action target>", "type": "json scalar", "notes": "midl_render: action kind command|put with a dotted target is PUT as-is with action.value or true (e.g. demo doc 'steering.autopilot.tack')" }
+      ],
+      "rate": "none (one PUT per tap, net worker queue)",
+      "other": ["NMEA2000 backend refuses all writes (BackendUnavailable)"]
+    },
+    {
+      "id": "cloud",
+      "repo": "yey-boats/navigator",
+      "ref": "3b7a1c6cca",
+      "files": ["bundles/signalk@2026-06-05/remote_steering.py", "bundles/signalk@2026-06-05/signalk_tools.py", "bundles/signalk@2026-06-05/entrypoint.py", "bundles/signalk@2026-06-05/boat_rpc.py"],
+      "role": "Mini App buttons + chat autopilot_* tools; sends op put to this connector for a connector boat",
+      "via_connector": true,
+      "paths": [
+        { "path": "steering.autopilot.state", "type": "string", "values": ["auto", "wind", "route", "standby"], "notes": "_MODES; lower-cased, quotes stripped; anything else refused bad_value" },
+        { "path": "steering.autopilot.actions.adjustHeading", "type": "integer", "unit": "deg", "min": -150, "max": 150, "clamp": "an explicit step past 150 is REFUSED (bad_value); only the computed tack/gybe turn is clamped to +-150 (_clamp) before it is sent; chat autopilot_adjust takes radians and converts", "notes": "also the device dialect adjustHeading.plusN/minusN, sent as adjustHeading=N" },
+        { "path": "steering.autopilot.target.headingTrue", "type": "number", "unit": "rad", "min": 0, "max": 6.283185307179586, "notes": "0 <= v <= 2pi INCLUSIVE; outside refused, never wrapped" },
+        { "path": "steering.autopilot.<anything else>", "type": "json scalar", "notes": "resolve_action fallback: any target starting steering.autopilot. is PUT as-is with value or true (the trigger convention)" }
+      ],
+      "rate": "12 confirmed actions/min per user (rate_ok); boat_rpc 30 requests/min per boat",
+      "request": { "boat_id": "always sent (boat_rpc.call, since 8dc79de7)", "deadline_ms": "always sent: wall clock now + timeout (<= 5 s)", "id": "rpc_ + 24 hex" },
+      "other": ["needs an owner grant (two-channel code) and, for a connector boat, the on-boat switch", "audits every steer in Postgres"]
+    },
+    {
+      "id": "connector-0.4",
+      "repo": "yey-boats/signalk-yey-connector",
+      "ref": "c1c582861d",
+      "files": ["lib/rpc.js"],
+      "role": "this plugin before #28: the last hop, executes app.putSelfPath",
+      "via_connector": true,
+      "paths": [
+        { "path": "steering.autopilot.state", "type": "json scalar", "notes": "any boolean, finite number or string <= 32 chars" },
+        { "path": "steering.autopilot.target.headingTrue", "type": "json scalar", "notes": "no range" },
+        { "path": "steering.autopilot.target.windAngleApparent", "type": "json scalar", "notes": "no range" },
+        { "path": "steering.autopilot.actions.<one segment>", "type": "json scalar", "notes": "any action name" }
+      ],
+      "rate": "12 puts/min (on top of 30 requests/min)",
+      "request": { "boat_id": "checked only if present", "deadline_ms": "optional; a put without one is never stale", "replay": "in-memory, last 256 ids, lost on restart" }
+    },
+    {
+      "id": "sim-autopilot-plugin",
+      "repo": "yey-boats/simulator",
+      "ref": "26d8e6e3ef",
+      "files": ["signalk-plugin/index.js"],
+      "role": "simulator-only SignalK PUT handler; re-emits steering.autopilot.command deltas",
+      "via_connector": false,
+      "paths": [
+        { "path": "steering.autopilot.state", "type": "string", "values": ["standby", "auto", "wind", "route"], "notes": "track/pretrack mapped to route; quotes stripped; else 400" },
+        { "path": "steering.autopilot.actions.adjustHeading", "type": "number", "unit": "deg", "notes": "any finite number or numeric string; no range; converted to radians" },
+        { "path": "steering.autopilot.target.headingTrue", "type": "number", "unit": "rad", "notes": "any finite number or numeric string; no range" },
+        { "path": "steering.autopilot.actions.tack", "type": "enum", "values": ["port", "starboard", true] },
+        { "path": "steering.autopilot.actions.advanceMode", "type": "trigger", "notes": "any value; cycles standby->auto->wind->route" }
+      ],
+      "rate": "none"
+    },
+    {
+      "id": "manager-bridge-removed",
+      "repo": "yey-boats/Instruments-manager",
+      "ref": "3f2c5d98a8",
+      "files": ["(removed) autopilot PUT bridge"],
+      "role": "former display-manager PUT bridge, moved to the simulator plugin",
+      "via_connector": false,
+      "paths": [
+        { "path": "steering.autopilot.state", "type": "string", "notes": "no enum; track/pretrack mapped to route" },
+        { "path": "steering.autopilot.actions.adjustHeading", "type": "number", "unit": "deg", "notes": "Number(value)||0: garbage became a 0 turn" },
+        { "path": "steering.autopilot.target.headingTrue", "type": "number", "unit": "rad", "notes": "Number(value)||0: garbage became heading 0" }
+      ],
+      "rate": "none"
+    },
+    {
+      "id": "sim-command-listener",
+      "repo": "yey-boats/simulator",
+      "ref": "26d8e6e3ef",
+      "files": ["src/yey/boats/simulator/engine/command_listener.py", "src/yey/boats/simulator/engine/autopilot.py"],
+      "role": "Python simulator: applies steering.autopilot.command {action,value,nonce} deltas",
+      "via_connector": false,
+      "paths": [
+        { "path": "steering.autopilot.command", "type": "object", "values": ["engage", "disengage", "set_mode", "set_heading", "adjust", "tack"], "notes": "set_heading/adjust values in radians (converted to degrees); modes standby|auto|wind|route; heading wrapped mod 360; unknown actions ignored" }
+      ],
+      "rate": "none; nonce dedupe, last 256-512 in memory"
+    }
+  ],
+  "differences": [
+    "adjustHeading step: firmware +-90 (refuse), cloud +-150 (refuse explicit, clamp computed tack/gybe), sim and connector-0.4 unbounded.",
+    "headingTrue: firmware [0,2pi), cloud [0,2pi] inclusive, sim/bridge/connector-0.4 unbounded.",
+    "state vocabulary: cloud auto|wind|route|standby; firmware adds track|pretrack; sim maps track/pretrack to route; connector-0.4 any short string.",
+    "actions: connector-0.4 any single segment; the only action names any implementation sends or handles are adjustHeading, tack, advanceMode.",
+    "windAngleApparent: allowlisted by connector-0.4 only; no implementation sends it.",
+    "rate: cloud 12/min per user, connector 12/min per boat, firmware/sim none."
+  ],
+  "emits": [
+    { "from": "cloud", "path": "steering.autopilot.state", "value": "auto" },
+    { "from": "cloud", "path": "steering.autopilot.state", "value": "wind" },
+    { "from": "cloud", "path": "steering.autopilot.state", "value": "route" },
+    { "from": "cloud", "path": "steering.autopilot.state", "value": "standby" },
+    { "from": "cloud", "path": "steering.autopilot.actions.adjustHeading", "value": 10 },
+    { "from": "cloud", "path": "steering.autopilot.actions.adjustHeading", "value": -1 },
+    { "from": "cloud", "path": "steering.autopilot.actions.adjustHeading", "value": 150 },
+    { "from": "cloud", "path": "steering.autopilot.actions.adjustHeading", "value": -150 },
+    { "from": "cloud", "path": "steering.autopilot.target.headingTrue", "value": 0 },
+    { "from": "cloud", "path": "steering.autopilot.target.headingTrue", "value": 4.71238898 },
+    { "from": "firmware", "path": "steering.autopilot.state", "value": "track" },
+    { "from": "firmware", "path": "steering.autopilot.state", "value": "pretrack" },
+    { "from": "firmware", "path": "steering.autopilot.actions.adjustHeading", "value": 90 },
+    { "from": "sim-autopilot-plugin", "path": "steering.autopilot.actions.tack", "value": "port" },
+    { "from": "sim-autopilot-plugin", "path": "steering.autopilot.actions.tack", "value": "starboard" },
+    { "from": "sim-autopilot-plugin", "path": "steering.autopilot.actions.tack", "value": true },
+    { "from": "sim-autopilot-plugin", "path": "steering.autopilot.actions.advanceMode", "value": true }
+  ],
+  "must_refuse": [
+    { "path": "steering.autopilot.state", "value": "nonsense", "why": "not a mode anywhere" },
+    { "path": "steering.autopilot.state", "value": true, "why": "connector-0.4 accepted any scalar" },
+    { "path": "steering.autopilot.actions.adjustHeading", "value": 151, "why": "past the cloud's one-manoeuvre bound" },
+    { "path": "steering.autopilot.actions.adjustHeading", "value": "10", "why": "degrees are numbers, not strings" },
+    { "path": "steering.autopilot.target.headingTrue", "value": 270, "why": "degrees sent as radians" },
+    { "path": "steering.autopilot.target.headingTrue", "value": -0.1, "why": "negative" },
+    { "path": "steering.autopilot.target.headingTrue", "value": 6.283185307179586, "why": "2pi: the policy range is [0,2pi); the cloud allows 2pi inclusive (see differences)" },
+    { "path": "steering.autopilot.target.windAngleApparent", "value": 3.2, "why": "past pi" },
+    { "path": "steering.autopilot.actions.tack", "value": "left", "why": "not port/starboard/true" },
+    { "path": "steering.autopilot.actions.gybe", "value": true, "why": "no implementation handles it; connector-0.4 accepted any action" },
+    { "path": "steering.autopilot.actions.dodge", "value": true, "why": "not in the vocabulary" },
+    { "path": "steering.autopilot.tack", "value": true, "why": "firmware MIDL demo target; not an autopilot PUT path" }
+  ]
+}
