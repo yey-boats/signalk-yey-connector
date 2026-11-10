@@ -10,6 +10,7 @@ const {
   createRpcServer, REFUSAL, REQUEST_EVENT, REQUEST_SCHEMA, REPLY_SCHEMA, REPLY_SUBJECT,
   STEERING_PATHS, LIMITS, isSteeringPath, isPutScalar, putOutcome
 } = require('../lib/rpc')
+const { POLICY_VERSION, describePolicy } = require('../lib/steering-policy')
 const pkg = require('../package.json')
 
 let seq = 0
@@ -63,7 +64,11 @@ function server (opts = {}) {
     setStatus: (msg) => app.setPluginStatus(msg),
     debug: (msg) => app.debug(msg)
   })
-  return { rpc, sent, app, advance: (ms) => { clock += ms } }
+  // A put needs a live deadline (lib/steering-policy.js): `deadline_ms: 0` in
+  // req() means "a few seconds from the server's clock now", as the cloud sends.
+  const live = (env) => (env && env.data && env.data.deadline_ms === 0)
+    ? { ...env, data: { ...env.data, deadline_ms: clock + 5000 } } : env
+  return { rpc: { ...rpc, handle: (env) => rpc.handle(live(env)) }, sent, app, advance: (ms) => { clock += ms } }
 }
 
 const put = (path, value) => req('put', { path, value })
@@ -128,7 +133,11 @@ test('allowlist edge cases are refused not_permitted without executing', async (
     'steering.autopilot',
     'steering.autopilot.actions',
     'steering.autopilot.target',
-    'steering.autopilot.target.headingMagnetic',
+    // Not in the policy's action vocabulary (#28): connector 0.4 took any
+    // single segment under actions.
+    'steering.autopilot.actions.gybe',
+    'steering.autopilot.actions.anything',
+    'steering.autopilot.target.windAngleTrue',
     'steering.rudderAngle',
     'electrical.switches.x.state',
     'vessels.self.steering.autopilot.state'
@@ -150,10 +159,14 @@ test('isSteeringPath matches the published patterns', () => {
   assert.deepEqual([...STEERING_PATHS], [
     'steering.autopilot.state',
     'steering.autopilot.target.headingTrue',
+    'steering.autopilot.target.headingMagnetic',
     'steering.autopilot.target.windAngleApparent',
-    'steering.autopilot.actions.*'
+    'steering.autopilot.actions.adjustHeading',
+    'steering.autopilot.actions.tack',
+    'steering.autopilot.actions.advanceMode'
   ])
   assert.equal(isSteeringPath('steering.autopilot.actions.adjustHeading'), true)
+  assert.equal(isSteeringPath('steering.autopilot.actions.gybe'), false)
   assert.equal(isSteeringPath('steering.autopilot.actions.'), false)
   assert.equal(isSteeringPath('steering.autopilot.actions.a.b'), false)
 })
@@ -180,16 +193,20 @@ test('puts ignore consent / plan / on_request', async () => {
 
 // ── value validation ─────────────────────────────────────────────────────────
 
-test('only JSON scalars are accepted as values', async () => {
+test('values are checked per path by the steering policy (#21), not just "a scalar"', async () => {
   const { rpc, app } = server({ limits: { max_puts_per_min: 100 } })
-  for (const v of [null, {}, [], [1], { value: 1 }, NaN, Infinity, 'x'.repeat(33)]) {
+  // Connector 0.4 accepted every one of these on steering.autopilot.state.
+  for (const v of [null, {}, [], [1], { value: 1 }, NaN, Infinity, 'x'.repeat(33), true, 0, 3.14, '', 'x'.repeat(32), 'AUTO']) {
     const r = await rpc.handle(put('steering.autopilot.state', v))
     assert.equal(r.error, REFUSAL.BAD_REQUEST, JSON.stringify(v))
-    assert.equal(r.detail, 'value')
+    assert.equal(r.detail, 'value_not_allowed', JSON.stringify(v))
   }
-  assert.equal((await rpc.handle(req('put', { path: 'steering.autopilot.state' }))).error, REFUSAL.BAD_REQUEST)
+  const missing = await rpc.handle(req('put', { path: 'steering.autopilot.state' }))
+  assert.deepEqual([missing.error, missing.detail], [REFUSAL.BAD_REQUEST, 'value_missing'])
+  assert.equal((await rpc.handle(put('steering.autopilot.target.headingTrue', 7))).detail, 'value_out_of_range')
+  assert.equal((await rpc.handle(put('steering.autopilot.target.headingTrue', '1'))).detail, 'value_type')
   assert.equal(app.calls.length, 0)
-  for (const v of [true, false, 0, -10, 3.14, '', 'auto', 'x'.repeat(32)]) {
+  for (const v of ['auto', 'standby', 'wind', 'route']) {
     assert.equal((await rpc.handle(put('steering.autopilot.state', v))).ok, true, JSON.stringify(v))
   }
   assert.equal(isPutScalar('x'.repeat(32)), true)
@@ -370,7 +387,12 @@ test('capabilities reflects the option and names the allowlist', async () => {
       op: 'capabilities',
       ok: true,
       result: {
-        remote_steering: { enabled: on, paths: [...STEERING_PATHS] },
+        remote_steering: {
+          enabled: on,
+          paths: [...STEERING_PATHS],
+          policy_version: POLICY_VERSION,
+          policy: describePolicy()
+        },
         connector_version: pkg.version
       }
     })

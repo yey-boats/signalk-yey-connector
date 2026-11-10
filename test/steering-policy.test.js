@@ -333,3 +333,14 @@ test('rpc put timeout: reads back the path and audits the late outcome', async (
   assert.equal(audits[1].outcome, 'accepted')
   assert.equal(audits[1].detail, 'after_timeout')
 })
+
+test('rpc put: refusals before dispatch still count against the request rate', async () => {
+  const { rpc } = rpcServer({ rpc: { limits: { max_per_min: 2 } } })
+  const noDeadline = () => env({ path: 'steering.autopilot.state', value: 'auto' }, { deadline_ms: undefined })
+  assert.equal((await rpc.handle(noDeadline())).detail, 'deadline_missing')
+  assert.equal((await rpc.handle(noDeadline())).detail, 'deadline_missing')
+  assert.equal((await rpc.handle(noDeadline())).error, REFUSAL.RATE_LIMITED)
+  const off = rpcServer({ rpc: { limits: { max_per_min: 1 }, remoteSteering: false } })
+  assert.equal((await off.rpc.handle(env({ path: 'steering.autopilot.state', value: 'auto' }))).error, REFUSAL.REMOTE_STEERING_OFF)
+  assert.equal((await off.rpc.handle(env({ path: 'steering.autopilot.state', value: 'auto' }))).error, REFUSAL.RATE_LIMITED)
+})

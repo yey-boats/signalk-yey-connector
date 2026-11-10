@@ -66,7 +66,7 @@ module.exports = function signalkYeyConnectorPlugin (app) {
           description:
             'Off by default. When on, yey.boats may ask this server to change the ' +
             'autopilot only (steering.autopilot.state, its heading / wind-angle ' +
-            'targets and steering.autopilot.actions.*), carried out by your own ' +
+            'targets and the adjustHeading / tack / advanceMode actions, each value range-checked), carried out by your own ' +
             'autopilot plugin. Nothing else can be written. You must ALSO turn ' +
             'remote steering on in the yey.boats app, with a code sent to your ' +
             'Telegram. The "Never send these paths" list below still applies. ' +
