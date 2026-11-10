@@ -152,7 +152,8 @@ test('an expired link is unknown_or_expired_code, and nothing is stored', async 
 })
 
 test('an unreachable origin is unreachable', async () => {
-  const h = harness()
+  // A non-yey origin needs the owner's opt-in (#25) before it is even tried.
+  const h = harness({ options: { allow_custom_origin: true } })
   await assert.rejects(h.runtime.resolveConnection({ url: 'https://nowhere.example/c/x' }),
     (e) => e.code === 'unreachable')
 })
@@ -277,7 +278,8 @@ test('routes: resolve → confirm → status → disconnect', async () => {
 })
 
 test('routes: key connect, and typed errors with their HTTP status', async () => {
-  const h = harness()
+  // allow_custom_origin so nowhere.example is tried and comes back unreachable (#25).
+  const h = harness({ options: { allow_custom_origin: true } })
   const r = fakeRouter()
   registerRoutes(r, () => h.runtime)
 
@@ -558,4 +560,46 @@ test('the display name from pairing is not one the owner chose on the boat', asy
   const saved = JSON.parse(fs.readFileSync(h.stateFile, 'utf8'))
   assert.equal(saved.display_name, 'Sara')
   assert.equal(saved.display_name_set_at, '', 'so the first hello does not claim it')
+})
+
+// #25: the runtime refuses a non-yey link unless the owner set
+// allow_custom_origin, and says so loudly when it is set.
+test('a link on another site is origin_not_allowed (403), nothing fetched or stored', async () => {
+  const h = harness()
+  await assert.rejects(h.runtime.resolveConnection({ url: 'https://evil.example/c/ABC-DEF-GHJ' }),
+    (e) => e.code === 'origin_not_allowed')
+  assert.equal(h.fetchCalls.length, 0)
+  assert.equal(fs.existsSync(h.stateFile), false)
+  const r = fakeRouter()
+  registerRoutes(r, () => h.runtime)
+  const out = await hit(r, 'POST /connect/resolve', { url: 'http://evil.example/c/x' })
+  assert.equal(out.code, 403)
+  assert.equal(out.body.error.code, 'insecure_origin')
+})
+
+test('allow_custom_origin: a custom origin resolves, flagged untrusted, with a status warning', async () => {
+  const CUSTOM = 'https://boats.example.org/c/ABC-DEF-GHJ'
+  const doc = {
+    ...DOC,
+    pair_url: 'https://boats.example.org/api/integrations/bundles/home/demo/signalk@2026-06-05/public/signalk_boat_pair',
+    routing: { ...DOC.routing, origin: 'https://boats.example.org' }
+  }
+  const h = harness({ options: { allow_custom_origin: true }, docs: { [CUSTOM]: [200, doc] } })
+  assert.match(h.runtime.snapshot().origin_warning, /allow_custom_origin/)
+  assert.match(h.runtime.statusMessage(), /WARNING/)
+  const out = await h.runtime.resolveConnection({ url: CUSTOM })
+  assert.equal(out.origin, 'https://boats.example.org')
+  assert.equal(out.origin_trusted, false)
+  assert.equal(h.runtime.snapshot().connection.origin_trusted, false)
+  await h.runtime.confirmConnection({})
+  assert.equal(h.runtime.snapshot().connection.status, 'connected')
+  assert.match(h.runtime.snapshot().origin_warning, /boats\.example\.org/)
+  assert.match(h.runtime.statusMessage(), /WARNING.*boats\.example\.org/)
+})
+
+test('without allow_custom_origin there is no origin warning, and yey.boats is trusted', async () => {
+  const h = harness()
+  assert.equal(h.runtime.snapshot().origin_warning, '')
+  const out = await h.runtime.resolveConnection({ url: URL_CODE })
+  assert.equal(out.origin_trusted, true)
 })

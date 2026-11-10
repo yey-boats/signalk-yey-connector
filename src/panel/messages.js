@@ -22,6 +22,10 @@ const MESSAGES = {
   plugin_stopped: 'The connector is not running.',
   network: 'The SignalK server did not answer.',
   invalid_name: 'A boat name cannot be empty.',
+  origin_not_allowed: 'This link is not from yey.boats, so the connector refused it. Get the link on yey.boats. ' +
+    '(Running your own server? Set allow_custom_origin in the plugin settings file.)',
+  insecure_origin: 'This link starts with http://. Use the https:// link from yey.boats ' +
+    '(http:// is only accepted for localhost or a yey box at yey.local).',
 
   // yey.boats refusing the pairing
   invalid_or_expired_code: 'This link was already used or has expired. Get a fresh one on yey.boats.',

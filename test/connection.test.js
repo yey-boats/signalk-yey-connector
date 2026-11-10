@@ -165,3 +165,66 @@ test('routing maps onto the cfg names the uplink reads', () => {
   })
 })
 
+
+// #25: a connection link may only point the boat at yey.boats, unless the
+// owner opted in with allow_custom_origin. http:// only on this machine or a
+// yey box (yey.local).
+const { checkOrigin, ALLOWED_ORIGINS } = require('../lib/connection')
+
+test('origins: yey.boats, my.yey.boats and local hosts are trusted without any setting', () => {
+  for (const raw of ['https://yey.boats/c/ABC-DEF-GHJ', 'https://my.yey.boats/c/x',
+    'http://yey.local/c/x', 'http://yey.local:3000/c/x', 'http://localhost:8080/c/x',
+    'http://127.0.0.1:9/c/x', 'https://localhost/c/x']) {
+    const out = checkOrigin(raw)
+    assert.equal(out.trusted, true, raw)
+    assert.equal(out.origin, new URL(raw).origin)
+  }
+  assert.ok(ALLOWED_ORIGINS.includes('https://yey.boats'))
+})
+
+test('origins: any other https origin is origin_not_allowed unless allow_custom_origin', () => {
+  for (const raw of ['https://evil.example/c/x', 'https://yey.boats.evil.example/c/x',
+    'https://yey.boats:8443/c/x', 'https://staging.example/c/x']) {
+    assert.throws(() => checkOrigin(raw), (e) => e.code === 'origin_not_allowed', raw)
+    const out = checkOrigin(raw, { allowCustomOrigin: true })
+    assert.equal(out.trusted, false, raw)
+  }
+})
+
+test('origins: http:// is refused off localhost/yey.local, even with allow_custom_origin', () => {
+  for (const raw of ['http://yey.boats/c/x', 'http://evil.example/c/x', 'http://192.168.1.5/c/x']) {
+    assert.throws(() => checkOrigin(raw), (e) => e.code === 'insecure_origin', raw)
+    assert.throws(() => checkOrigin(raw, { allowCustomOrigin: true }),
+      (e) => e.code === 'insecure_origin', raw)
+  }
+})
+
+test('fetch: a link on another site is refused before any request', async () => {
+  const calls = []
+  await rejectsWith(fetchConnectionDocument('https://evil.example/c/ABC-DEF-GHJ',
+    { fetchImpl: fakeFetch(200, DOC, calls) }), 'origin_not_allowed')
+  await rejectsWith(fetchConnectionDocument('http://evil.example/c/ABC-DEF-GHJ',
+    { fetchImpl: fakeFetch(200, DOC, calls) }), 'insecure_origin')
+  assert.equal(calls.length, 0)
+})
+
+test('fetch: a yey.boats link whose document routes elsewhere is refused', async () => {
+  const away = {
+    ...DOC,
+    pair_url: 'https://evil.example/api/integrations/bundles/home/demo/signalk@2026-06-05/public/signalk_boat_pair',
+    routing: { ...DOC.routing, origin: 'https://evil.example' }
+  }
+  await rejectsWith(fetchConnectionDocument('https://yey.boats/c/ABC-DEF-GHJ',
+    { fetchImpl: fakeFetch(200, away) }), 'origin_not_allowed')
+})
+
+test('fetch: with allowCustomOrigin a custom https origin connects', async () => {
+  const custom = {
+    ...DOC,
+    pair_url: 'https://boats.example.org/api/integrations/bundles/home/demo/signalk@2026-06-05/public/signalk_boat_pair',
+    routing: { ...DOC.routing, origin: 'https://boats.example.org' }
+  }
+  const doc = await fetchConnectionDocument('https://boats.example.org/c/ABC-DEF-GHJ',
+    { fetchImpl: fakeFetch(200, custom), allowCustomOrigin: true })
+  assert.equal(doc.routing.origin, 'https://boats.example.org')
+})

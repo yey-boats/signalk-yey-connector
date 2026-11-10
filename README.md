@@ -164,6 +164,15 @@ so, the plugin stops gathering, and approving there resumes it.
 **Self-hosted or a yey box:** the link is simply local (`http://yey.local/c/…`).
 Nothing else differs.
 
+**Which links are accepted.** A connection link has to be on yey.boats
+(`https://yey.boats`, `https://my.yey.boats`), on this machine (`localhost`, `127.0.0.1`)
+or on a yey box (`yey.local`); the site the link routes the boat to is checked the same
+way. Anything else is refused, so a link in a phishing message cannot point the boat
+somewhere else. `http://` is accepted only for those local hosts. To connect to your
+own https server, put `"allow_custom_origin": true` in the plugin settings file; the
+plugin status and the panel then show a warning, and the panel says which site a link
+is from before you confirm.
+
 Routing, the boat id and the credential are kept in the plugin's private state file,
 never in its settings. The older standalone page at `/plugins/signalk-yey-connector/`
 and its pairing-code calls are gone: the panel is the one way to connect.
@@ -179,6 +188,7 @@ The panel replaces the generated settings form. What it writes:
 | `advanced.deny` | `[]` | Paths that must never leave the boat (a path covers everything under it). Always wins over the plan. In the panel's collapsed **Advanced** section. |
 | `advanced.bufferMegabytes` | `50` | How much to keep while offline. Also under **Advanced**. |
 | `remote_steering` | `false` | Allow remote steering from yey.boats, autopilot only. See [Remote steering](#remote-steering). Also under **Advanced**. |
+| `allow_custom_origin` | `false` | *(not in the panel)* Accept connection links from an https site other than yey.boats, for a server you run yourself. While it is on, the plugin status and the panel show a warning. |
 
 Switching the plugin off in Plugin Config stops sending.
 
