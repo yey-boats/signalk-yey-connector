@@ -73,6 +73,14 @@ module.exports = function signalkYeyConnectorPlugin (app) {
             'Untick to switch it off immediately.',
           default: false
         },
+        allow_custom_origin: {
+          type: 'boolean',
+          title: 'Accept connection links from sites other than yey.boats',
+          description:
+            'Off by default. Only for a server you run yourself, over https. While on, ' +
+            'the plugin status and panel show a warning.',
+          default: false
+        },
         remote_steering_auto_off_hours: {
           type: 'number',
           title: 'Switch remote steering off after (hours, 0 = never)',
