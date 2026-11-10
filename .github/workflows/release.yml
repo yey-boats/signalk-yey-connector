@@ -1,0 +1,91 @@
+name: Release
+
+# Push a v<version> tag on main (scripts/release.sh does it) and this builds
+# the GitHub release: tests, `npm pack`, notes from CHANGELOG.md, the tarball
+# attached. Not published to npm yet (#26): that is a later step.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Tag matches package.json
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::tag $tag does not match package.json version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/changelog-section.js "$VERSION" > "$RUNNER_TEMP/notes.md"
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Pack
+        id: pack
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          npm pack --silent > "$RUNNER_TEMP/pack.txt"
+          tgz="signalk-yey-connector-${VERSION}.tgz"
+          test -f "$tgz"
+          tar -xzOf "$tgz" package/package.json | node -e "
+            const p = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            if (p.version !== process.env.VERSION) { console.error('tarball is ' + p.version); process.exit(1) }"
+          echo "tgz=$tgz" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$tgz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TGZ: ${{ steps.pack.outputs.tgz }}
+          SHA256: ${{ steps.pack.outputs.sha256 }}
+        run: |
+          notes="$RUNNER_TEMP/notes.md"
+          {
+            echo
+            echo '**Install or upgrade** in your SignalK server data directory. npm 12, as in current SignalK images, refuses URL installs, so download first:'
+            echo
+            echo '```bash'
+            echo 'cd ~/.signalk'
+            echo "curl -fLO https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${TGZ}"
+            echo "npm install ./${TGZ}"
+            echo '```'
+            echo
+            echo 'Restart SignalK, then hard-reload the admin page (Ctrl+Shift+R / Cmd+Shift+R; Safari: Cmd+Option+R).'
+            echo
+            echo "sha256 of the tarball: ${SHA256}"
+          } >> "$notes"
+          gh release create "$GITHUB_REF_NAME" "$TGZ" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file "$notes" \
+            --verify-tag
