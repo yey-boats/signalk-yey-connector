@@ -128,6 +128,29 @@ function ConsentForm ({ consent, deny, busy, submitLabel, onSubmit, onBack, intr
     onBack ? h('button', { type: 'button', className: 'btn btn-link', disabled: busy, onClick: onBack }, 'Back') : null))
 }
 
+/** The auto-off line under the hours field (#22). */
+function steeringAutoOffNote (auto) {
+  const a = auto || {}
+  const parts = ['0 means never.']
+  if (a.off_at) parts.push('Switches off at ' + when(a.off_at) + '.')
+  if (a.switched_off_at) parts.push('Last switched off automatically ' + when(a.switched_off_at) + '.')
+  return parts.join(' ')
+}
+
+/** The last remote steering commands, newest first (#22). The full log is
+ *  yey-steering-audit.jsonl in the plugin data folder. */
+function steeringLog (rows) {
+  if (!Array.isArray(rows) || !rows.length) return null
+  return h('div', { className: 'mb-3' },
+    h('div', { className: 'form-label small mb-1' }, 'Recent remote steering commands'),
+    h('ul', { className: 'list-unstyled small text-muted mb-0' },
+      rows.slice().reverse().map((r, i) => h('li', { key: i },
+        when(r.t) + ' ',
+        r.path ? h('code', null, r.path + (r.value !== undefined && r.value !== null ? ' = ' + r.value : '')) : null,
+        ' ' + r.outcome + (r.error ? ' (' + r.error + ')' : '') +
+          (r.outcome === 'auto_off' ? ': remote steering switched off' : '')))))
+}
+
 function when (iso) {
   if (!iso) return 'not yet'
   const d = new Date(iso)
@@ -153,6 +176,7 @@ export default function PluginConfigurationPanel (props) {
   const [bufferMb, setBufferMb] = useState(advanced.bufferMegabytes || 50)
   // Remote steering: the owner's own switch, off unless saved as exactly true.
   const [steering, setSteering] = useState(configuration.remote_steering === true)
+  const [autoOffHours, setAutoOffHours] = useState(configuration.remote_steering_auto_off_hours || 0)
   const [savedNote, setSavedNote] = useState('')
 
   const refresh = useCallback(async () => {
@@ -324,6 +348,7 @@ export default function PluginConfigurationPanel (props) {
     const next = {
       ...configuration,
       remote_steering: steering === true,
+      remote_steering_auto_off_hours: Math.max(0, Number(autoOffHours) || 0),
       advanced: { ...advanced, deny: list, bufferMegabytes: mb }
     }
     delete next.key
@@ -508,6 +533,13 @@ export default function PluginConfigurationPanel (props) {
           'autopilot actions), by your own autopilot plugin. You must also turn it on in the ' +
           'yey.boats app with a code sent to your Telegram. The list above still applies. ' +
           'Untick and Save to switch it off.'),
+        field('yey-steering-auto-off', 'Switch remote steering off after (hours)',
+          h('input', {
+            id: 'yey-steering-auto-off', className: 'form-control form-control-sm', type: 'number', min: 0, step: 1,
+            style: { maxWidth: 120 }, value: autoOffHours, onChange: (e) => setAutoOffHours(e.target.value)
+          }),
+          steeringAutoOffNote(status && status.remote_steering_auto_off)),
+        steeringLog(status && status.steering_log),
         h('button', { type: 'submit', className: 'btn btn-secondary btn-sm' }, 'Save'),
         savedNote ? h('span', { className: 'ms-2 small text-success' }, savedNote) : null)),
     h('p', { className: 'small text-muted mt-4 mb-0' },

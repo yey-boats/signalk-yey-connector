@@ -189,6 +189,7 @@ The panel replaces the generated settings form. What it writes:
 | `advanced.bufferMegabytes` | `50` | How much to keep while offline. Also under **Advanced**. |
 | `remote_steering` | `false` | Allow remote steering from yey.boats, autopilot only. See [Remote steering](#remote-steering). Also under **Advanced**. |
 | `allow_custom_origin` | `false` | *(not in the panel)* Accept connection links from an https site other than yey.boats, for a server you run yourself. While it is on, the plugin status and the panel show a warning. |
+| `remote_steering_auto_off_hours` | `0` | Switch remote steering off this many hours after it was turned on; 0 = never. Also under **Advanced**. |
 
 Switching the plugin off in Plugin Config stops sending.
 
@@ -218,6 +219,17 @@ and your own autopilot plugin carries them out.
 - At most 12 commands a minute. Every command, carried out or refused, is written to the
   server log (debug) and shown as the plugin status, for example
   `Remote steering: steering.autopilot.state=auto accepted 12:03`.
+- **Audit log.** Every command is also appended to `yey-steering-audit.jsonl` in the
+  plugin's data folder (owner-only, mode 0600): time, request id, path, value and the
+  outcome (`accepted`, `refused` with the reason, `timeout`, `dropped`, and `auto_off`).
+  It rotates at 256 KB, keeping three old files (`.1`–`.3`). Refused and dropped commands
+  are logged up to 30 a minute; beyond that one `suppressed` line counts the rest, so a
+  flood cannot push the accepted commands out of the log. Accepted commands, timeouts and
+  auto-off are always logged. The panel shows the last ten under **Advanced**.
+- **Auto-off (optional).** Set *Switch remote steering off after (hours)* (option
+  `remote_steering_auto_off_hours`, default 0 = never) and the plugin unticks the switch
+  that many hours after it was turned on. The time survives restarts. The plugin status
+  and the panel say when it will switch off or when it did.
 - **To turn it off:** untick the setting under **Advanced** and press **Save** (the
   plugin restarts and refuses all commands), or switch it off in the yey.boats app, or
   switch the plugin off.

@@ -81,6 +81,16 @@ module.exports = function signalkYeyConnectorPlugin (app) {
             'the plugin status and panel show a warning.',
           default: false
         },
+        remote_steering_auto_off_hours: {
+          type: 'number',
+          title: 'Switch remote steering off after (hours, 0 = never)',
+          description:
+            'Turns "Allow remote steering" off this many hours after it was turned on. ' +
+            'Every remote steering command, accepted or refused, is also logged in the ' +
+            'plugin data folder (yey-steering-audit.jsonl).',
+          default: 0,
+          minimum: 0
+        },
         advanced: {
           type: 'object',
           title: 'Advanced',
