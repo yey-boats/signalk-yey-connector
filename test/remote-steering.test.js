@@ -163,7 +163,8 @@ test('isSteeringPath matches the published patterns', () => {
     'steering.autopilot.target.windAngleApparent',
     'steering.autopilot.actions.adjustHeading',
     'steering.autopilot.actions.tack',
-    'steering.autopilot.actions.advanceMode'
+    'steering.autopilot.actions.advanceMode',
+    'steering.autopilot.actions.advanceWaypoint'
   ])
   assert.equal(isSteeringPath('steering.autopilot.actions.adjustHeading'), true)
   assert.equal(isSteeringPath('steering.autopilot.actions.gybe'), false)

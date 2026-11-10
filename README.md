@@ -222,9 +222,10 @@ and your own autopilot plugin carries them out.
   | `steering.autopilot.actions.adjustHeading` | degrees, −150 to 150 |
   | `steering.autopilot.actions.tack` | `"port"`, `"starboard"` or `true` |
   | `steering.autopilot.actions.advanceMode` | `true` |
+  | `steering.autopilot.actions.advanceWaypoint` | `1` (handled by the SignalK autopilot plugin, route mode only) |
 
-  Each command must name this boat (`boat_id`) and carry a deadline (`deadline_ms`, at
-  most 60 s ahead); a late one is dropped. Request ids are remembered in
+  Each command must name this boat (`boat_id`, a string) and carry a deadline
+  (`deadline_ms`, at most 15 s ahead by the boat's clock); a late one is dropped. Request ids are remembered in
   `yey-steering-replay.json` in the plugin's data folder (mode 0600), so a replayed
   command is dropped even after a restart. If a command times out, the reply carries the
   path's current value and the log records what the autopilot finally did.

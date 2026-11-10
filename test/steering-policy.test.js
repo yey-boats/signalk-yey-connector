@@ -12,7 +12,7 @@ const path = require('node:path')
 
 const {
   createSteeringPolicy, validateValue, isSteeringPath, POLICY_VERSION, RULES, MODES,
-  MAX_HEADING_STEP_DEG, REPLAY_FILE, describePolicy
+  MAX_HEADING_STEP_DEG, REPLAY_FILE, describePolicy, MAX_DEADLINE_AHEAD_MS
 } = require('../lib/steering-policy')
 const { createRpcServer, REFUSAL, REQUEST_EVENT, REQUEST_SCHEMA } = require('../lib/rpc')
 const FIXTURE = require('./fixtures/steering-implementations.json')
@@ -47,7 +47,17 @@ test('fixture: every must_refuse command is refused', () => {
 test('fixture: the action vocabulary is exactly what some implementation handles', () => {
   const actions = Object.keys(RULES).filter((p) => p.startsWith('steering.autopilot.actions.'))
     .map((p) => p.split('.').pop()).sort()
-  assert.deepEqual(actions, ['adjustHeading', 'advanceMode', 'tack'])
+  assert.deepEqual(actions, ['adjustHeading', 'advanceMode', 'advanceWaypoint', 'tack'])
+  // advanceWaypoint is not sent by the yey stack; it is the action the stock
+  // SignalK autopilot plugin registers a PUT handler for (#35).
+  const external = (FIXTURE.external || []).flatMap((x) => x.paths.map((p) => p.path))
+  assert.ok(external.includes('steering.autopilot.actions.advanceWaypoint'))
+})
+
+test('fixture: advanceWaypoint takes exactly the value signalk-autopilot documents (1)', () => {
+  const p = 'steering.autopilot.actions.advanceWaypoint'
+  assert.equal(validateValue(p, 1), '')
+  for (const v of ['1', true, 2, 0, -1, null, 'next']) assert.notEqual(validateValue(p, v), '', JSON.stringify(v))
 })
 
 test('fixture: the state enum is the union of the firmware, cloud and sim modes', () => {
@@ -64,6 +74,7 @@ test('allowlist: exact paths only, no wildcard actions', () => {
   assert.deepEqual(Object.keys(RULES).sort(), [
     'steering.autopilot.actions.adjustHeading',
     'steering.autopilot.actions.advanceMode',
+    'steering.autopilot.actions.advanceWaypoint',
     'steering.autopilot.actions.tack',
     'steering.autopilot.state',
     'steering.autopilot.target.headingMagnetic',
@@ -129,6 +140,14 @@ test('request: boat_id is required and must be this boat', () => {
   assert.deepEqual(p.checkRequest({ id: 'rpc_aaaaaaaa03', boat_id: 'b_1', deadline_ms: T0 + 4000 }), {})
 })
 
+test('request: boat_id must be a string, not something String() turns into one (#35)', () => {
+  const { p } = policy()
+  for (const [i, bid] of [['b_1'], { toString: () => 'b_1' }, 1, true].entries()) {
+    assert.deepEqual(p.checkRequest({ id: `rpc_aaaaaaa${i}e0`, boat_id: bid, deadline_ms: T0 + 4000 }), { refuse: 'boat_id_type' }, JSON.stringify(bid))
+  }
+  assert.equal(p.replaySize(), 0)
+})
+
 test('request: an unknown own boat id refuses every put (fail closed)', () => {
   const p = createSteeringPolicy({ now: () => T0, boatId: () => '' })
   assert.deepEqual(p.checkRequest({ id: 'rpc_aaaaaaaa04', boat_id: 'b_1', deadline_ms: T0 + 4000 }), { refuse: 'boat_id_unknown' })
@@ -140,8 +159,12 @@ test('request: deadline_ms is required, refused when stale or too far ahead', ()
   assert.deepEqual(p.checkRequest({ id: 'rpc_aaaaaaaa12', boat_id: 'b_1', deadline_ms: 0 }), { refuse: 'deadline_missing' })
   assert.deepEqual(p.checkRequest({ id: 'rpc_aaaaaaaa13', boat_id: 'b_1', deadline_ms: 'soon' }), { refuse: 'deadline_missing' })
   assert.deepEqual(p.checkRequest({ id: 'rpc_aaaaaaaa14', boat_id: 'b_1', deadline_ms: T0 - 1 }), { drop: 'expired' })
-  assert.deepEqual(p.checkRequest({ id: 'rpc_aaaaaaaa15', boat_id: 'b_1', deadline_ms: T0 + 61_000 }), { refuse: 'deadline_too_far' })
-  assert.deepEqual(p.checkRequest({ id: 'rpc_aaaaaaaa16', boat_id: 'b_1', deadline_ms: T0 + 60_000 }), {})
+  // The cloud sets deadlines at most ~5 s ahead; 15 s leaves room for clock
+  // skew without accepting a put a minute stale (#35).
+  assert.equal(MAX_DEADLINE_AHEAD_MS, 15_000)
+  assert.deepEqual(p.checkRequest({ id: 'rpc_aaaaaaaa15', boat_id: 'b_1', deadline_ms: T0 + 15_001 }), { refuse: 'deadline_too_far' })
+  assert.deepEqual(p.checkRequest({ id: 'rpc_aaaaaaaa17', boat_id: 'b_1', deadline_ms: T0 + 60_000 }), { refuse: 'deadline_too_far' })
+  assert.deepEqual(p.checkRequest({ id: 'rpc_aaaaaaaa16', boat_id: 'b_1', deadline_ms: T0 + 15_000 }), {})
 })
 
 test('request: a replayed id is dropped', () => {
@@ -213,7 +236,7 @@ test('describe: a versioned, JSON-safe policy document', () => {
   assert.equal(d.max_heading_step_deg, 150)
   assert.equal(d.out_of_range, 'refuse')
   assert.equal(d.rate.puts_per_min, 12)
-  assert.deepEqual(d.request, { boat_id: 'required', deadline_ms: 'required', max_deadline_ahead_ms: 60000, replay: 'persisted' })
+  assert.deepEqual(d.request, { boat_id: 'required', deadline_ms: 'required', max_deadline_ahead_ms: 15000, replay: 'persisted' })
   assert.deepEqual(JSON.parse(JSON.stringify(d)), d)
 })
 
@@ -343,4 +366,90 @@ test('rpc put: refusals before dispatch still count against the request rate', a
   const off = rpcServer({ rpc: { limits: { max_per_min: 1 }, remoteSteering: false } })
   assert.equal((await off.rpc.handle(env({ path: 'steering.autopilot.state', value: 'auto' }))).error, REFUSAL.REMOTE_STEERING_OFF)
   assert.equal((await off.rpc.handle(env({ path: 'steering.autopilot.state', value: 'auto' }))).error, REFUSAL.RATE_LIMITED)
+})
+
+// ── #35 follow-ups ───────────────────────────────────────────────────────────
+
+test('rpc put: a flood past the replay store cannot block a later standby (rate before replay id, #35)', async () => {
+  let clock = T0
+  const calls = []
+  const audits = []
+  const steering = createSteeringPolicy({ now: () => clock, boatId: () => 'b_1' })
+  const rpc = createRpcServer({
+    app: { putSelfPath: (p, v) => { calls.push({ p, v }); return Promise.resolve({ state: 'COMPLETED', statusCode: 200 }) } },
+    getSource: () => ({ selfTree: async () => ({}) }),
+    publish: async () => {},
+    boatId: () => 'b_1',
+    now: () => clock,
+    remoteSteering: true,
+    audit: (e) => audits.push(e),
+    steeringPolicy: steering
+  })
+  // 1100 distinct, well-formed puts inside one minute: more than the store holds.
+  for (let i = 0; i < 1100; i++) {
+    await rpc.handle(env({ path: 'steering.autopilot.state', value: 'auto' }, { deadline_ms: clock + 4000 }))
+  }
+  // Only the puts the rate admitted may hold a replay id.
+  assert.ok(steering.replaySize() <= 30, `replay ids held: ${steering.replaySize()}`)
+  // Once the rate window allows, the owner's standby goes through.
+  clock += 61_000
+  const r = await rpc.handle(env({ path: 'steering.autopilot.state', value: 'standby' }, { deadline_ms: clock + 4000 }))
+  assert.equal(r.ok, true, JSON.stringify(r))
+  assert.deepEqual(calls[calls.length - 1], { p: 'steering.autopilot.state', v: 'standby' })
+})
+
+test('rpc put: a rate-limited put does not burn its id (a retry inside its deadline is answered)', async () => {
+  let clock = T0
+  const steering = createSteeringPolicy({ now: () => clock, boatId: () => 'b_1' })
+  const { rpc } = rpcServer({ steeringPolicy: steering, rpc: { now: () => clock, limits: { max_per_min: 1 } } })
+  assert.equal((await rpc.handle(env({ path: 'steering.autopilot.state', value: 'auto' }, { deadline_ms: clock + 4000 }))).ok, true)
+  const e = env({ path: 'steering.autopilot.state', value: 'standby' }, { deadline_ms: clock + 12_000 })
+  assert.equal((await rpc.handle(e)).error, REFUSAL.RATE_LIMITED)
+  assert.equal(steering.replaySize(), 1)
+})
+
+test('rpc put: a non-string boat_id is refused before anything is recorded', async () => {
+  const steering = createSteeringPolicy({ now: () => T0, boatId: () => 'b_1' })
+  const { rpc, calls } = rpcServer({ steeringPolicy: steering })
+  const r = await rpc.handle(env({ path: 'steering.autopilot.state', value: 'auto' }, { boat_id: ['b_1'] }))
+  assert.equal(r.error, REFUSAL.BAD_REQUEST)
+  assert.equal(r.detail, 'boat_id_type')
+  assert.equal(calls.length, 0)
+  assert.equal(steering.replaySize(), 0)
+})
+
+test('rpc put timeout: a put that fails after its timeout is still audited (#35)', async () => {
+  let late
+  const audits = []
+  const timers = []
+  const rpc = createRpcServer({
+    // The server answers after the timeout, with a reply that cannot be read.
+    app: { putSelfPath: () => new Promise((resolve) => { late = resolve }) },
+    getSource: () => ({ selfTree: async () => ({}) }),
+    publish: async () => {},
+    boatId: () => 'b_1',
+    now: () => T0,
+    remoteSteering: true,
+    audit: (e) => audits.push(e),
+    setTimer: (fn) => { timers.push(fn); return timers.length },
+    clearTimer: () => {}
+  })
+  const pending = rpc.handle(env({ path: 'steering.autopilot.state', value: 'auto' }))
+  await new Promise((resolve) => setImmediate(resolve))
+  timers[0]()
+  const r = await pending
+  assert.equal(r.error, REFUSAL.TIMEOUT)
+  assert.equal(audits[0].outcome, 'timeout')
+  late({ get state () { throw new Error('boom') } })
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(audits.length, 2, JSON.stringify(audits))
+  assert.equal(audits[1].outcome, 'refused')
+  assert.match(audits[1].detail, /^after_timeout/)
+})
+
+test('rpc put: advanceWaypoint=1 reaches the autopilot plugin (#35)', async () => {
+  const { rpc, calls } = rpcServer()
+  const r = await rpc.handle(env({ path: 'steering.autopilot.actions.advanceWaypoint', value: 1 }))
+  assert.equal(r.ok, true, JSON.stringify(r))
+  assert.deepEqual(calls, [{ p: 'steering.autopilot.actions.advanceWaypoint', v: 1 }])
 })

@@ -119,7 +119,8 @@
     { "from": "sim-autopilot-plugin", "path": "steering.autopilot.actions.tack", "value": "port" },
     { "from": "sim-autopilot-plugin", "path": "steering.autopilot.actions.tack", "value": "starboard" },
     { "from": "sim-autopilot-plugin", "path": "steering.autopilot.actions.tack", "value": true },
-    { "from": "sim-autopilot-plugin", "path": "steering.autopilot.actions.advanceMode", "value": true }
+    { "from": "sim-autopilot-plugin", "path": "steering.autopilot.actions.advanceMode", "value": true },
+    { "from": "signalk-autopilot", "path": "steering.autopilot.actions.advanceWaypoint", "value": 1 }
   ],
   "must_refuse": [
     { "path": "steering.autopilot.state", "value": "nonsense", "why": "not a mode anywhere" },
@@ -133,6 +134,22 @@
     { "path": "steering.autopilot.actions.tack", "value": "left", "why": "not port/starboard/true" },
     { "path": "steering.autopilot.actions.gybe", "value": true, "why": "no implementation handles it; connector-0.4 accepted any action" },
     { "path": "steering.autopilot.actions.dodge", "value": true, "why": "not in the vocabulary" },
-    { "path": "steering.autopilot.tack", "value": true, "why": "firmware MIDL demo target; not an autopilot PUT path" }
+    { "path": "steering.autopilot.tack", "value": true, "why": "firmware MIDL demo target; not an autopilot PUT path" },
+    { "path": "steering.autopilot.actions.advanceWaypoint", "value": true, "why": "not the value signalk-autopilot documents (1)" },
+    { "path": "steering.autopilot.actions.advanceWaypoint", "value": 2, "why": "a count, not a trigger: one waypoint per put" }
+  ],
+  "external": [
+    {
+      "id": "signalk-autopilot",
+      "repo": "SignalK/signalk-autopilot",
+      "package": "@signalk/signalk-autopilot@2.6.0",
+      "ref": "e8b168513665651e7451f2a96f0db9269cc84730",
+      "files": ["src/index.ts", "src/raymarinen2k.ts", "src/raystngconv.js", "README.md", "public-src/js/signalk-autopilot.js"],
+      "role": "not part of the yey stack: the stock SignalK autopilot plugin (Raymarine N2K / SeaTalk-STNG, Simrad, emulator), i.e. the PUT handler a connector put reaches on most boats (#35)",
+      "via_connector": true,
+      "paths": [
+        { "path": "steering.autopilot.actions.advanceWaypoint", "type": "number", "values": [1], "notes": "index.ts registers a PUT handler on exactly this path; the README documents value 1; the handler ignores the value and refuses unless state is route ('Autopilot not in track mode')." }
+      ]
+    }
   ]
 }
