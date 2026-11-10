@@ -35,7 +35,7 @@ section for that version below becomes the GitHub release notes.
   read-only data dir; a pending `suppressed` count is written on plugin stop
   (#37, fixes #33).
 - Tag-triggered release workflow, this changelog and `scripts/release.sh`
-  replacing the one-off release scripts (fixes #26).
+  replacing the one-off release scripts (#38, fixes #26).
 
 ### Docs
 - README: hard-reload the admin page after install, including Safari (#19).
