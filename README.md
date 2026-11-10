@@ -276,6 +276,24 @@ No test framework beyond Node's built-in runner. Every
 piece of logic lives in `lib/` as a pure module with an injected clock, filesystem and
 transport, so the plan engine can be tested with no boat, no socket and no cloud.
 
+### Releasing
+
+Changes are listed under **Unreleased** in [CHANGELOG.md](CHANGELOG.md) as they merge.
+A release is a tag; [`.github/workflows/release.yml`](.github/workflows/release.yml) does
+the rest (tests, `npm pack`, a GitHub release with the tarball, its sha256 and the
+CHANGELOG section as notes).
+
+1. Open a release PR: `npm version <v> --no-git-tag-version`, rename **Unreleased** in
+   CHANGELOG.md to `[<v>] - <date>` (with a fresh empty Unreleased above it and the
+   compare link at the bottom), and point the README install commands at `v<v>`.
+2. Merge it.
+3. `scripts/release.sh <v>` checks main (version, CHANGELOG section, no such tag yet),
+   then tags main `v<v>` and pushes the tag. `DRY_RUN=1` checks only; `REMOTE=<url>`
+   pushes somewhere other than `origin`.
+4. Watch the **Release** workflow; the release appears under GitHub Releases.
+
+The package is not published to npm yet; that will be a step in the same workflow.
+
 ## Licence
 
 Apache License 2.0, the same licence as the SignalK server. See `LICENSE` and
