@@ -30,6 +30,11 @@ section for that version below becomes the GitHub release notes.
   the status and panel say why. Puts refused as `deadline_too_far` or dropped
   as `expired` now name a likely boat clock problem in the status and panel
   (fixes #39).
+- Auto-off follow-ups: when auto-off fires but the options save fails (data
+  folder writable), a marker in private state keeps remote steering off after
+  a restart instead of starting a new period; the clock offset estimate leaves
+  out the up-to-15 s deadline lead; only puts the rate admits set the clock
+  problem; auto-off firing at once on a read-only folder says why (fixes #41).
 
 ### Added
 - Remote steering audit log (`yey-steering-audit.jsonl`, 0600, rotated) and

@@ -159,7 +159,7 @@ test('a put refused as deadline_too_far names a likely slow boat clock', async (
   await rpc.handle(put(T0 + 40_000))
   const c = rpc.stats().clock_problem
   assert.equal(c.reason, 'deadline_too_far')
-  assert.match(c.text, /boat clock .*about 40 s slow/i)
+  assert.match(c.text, /boat clock .*about 25 s slow/i)
   assert.match(statuses.pop(), /clock/i)
 })
 
@@ -177,5 +177,130 @@ test('an accepted put clears the clock problem', async () => {
   await rpc.handle(put(T0 + 40_000))
   assert.ok(rpc.stats().clock_problem)
   await rpc.handle(put(T0 + 4000))
+  assert.equal(rpc.stats().clock_problem, null)
+})
+
+// ── #41 follow-ups ───────────────────────────────────────────────────────────
+
+test('#41 writable data dir + failing options save: after auto-off fired, a restart keeps steering off', () => {
+  const dir = tmp()
+  const clock = { t: T0 }
+  const first = runtimeWith({ dir, options: ON, clock, saveFails: true })
+  assert.equal(first.rpcOpts().remoteSteering(), true)
+  clock.t = T0 + 2 * H
+  assert.equal(first.rpcOpts().remoteSteering(), false)   // auto-off fires; the options save fails
+  clock.t = T0 + 2.5 * H
+  const again = runtimeWith({ dir, options: ON, clock, saveFails: true })
+  assert.equal(again.rpcOpts().remoteSteering(), false)
+  clock.t = T0 + 10 * H
+  assert.equal(again.rpcOpts().remoteSteering(), false)
+  const auto = again.runtime.snapshot().remote_steering_auto_off
+  assert.equal(auto.problem, 'auto_off_fired')
+  assert.match(auto.problem_text, /could not be saved/)
+  assert.match(again.statuses.join('\n'), /Remote steering is off: .*could not be saved/)
+})
+
+test('#41 a throwing options save is handled the same way (fail closed)', () => {
+  const dir = tmp()
+  const clock = { t: T0 }
+  const mk = () => createRuntime({
+    app: {
+      debug: () => {},
+      getDataDirPath: () => dir,
+      setPluginStatus: () => {},
+      savePluginOptions: () => { throw new Error('boom') }
+    },
+    version: '9.9.9',
+    options: ON,
+    deps: { now: () => clock.t, setTimeout: () => 1, clearTimeout: () => {},
+      source: { subscribe: () => ({ close: () => {} }), selfTree: async () => ({}) } }
+  })
+  mk()
+  clock.t = T0 + 2 * H
+  const second = mk()  // auto-off fires at start; the save throws
+  assert.equal(second.snapshot().remote_steering, false)
+  clock.t = T0 + 2.5 * H
+  assert.equal(mk().snapshot().remote_steering, false)
+})
+
+test('#41 the auto-off marker is cleared once the switch is seen off, so ticking it again starts a new period', () => {
+  const dir = tmp()
+  const clock = { t: T0 }
+  const first = runtimeWith({ dir, options: ON, clock, saveFails: true })
+  clock.t = T0 + 2 * H
+  assert.equal(first.rpcOpts().remoteSteering(), false)
+  clock.t = T0 + 3 * H
+  runtimeWith({ dir, options: { ...ON, remote_steering: false }, clock })  // owner unticks
+  clock.t = T0 + 3.5 * H
+  const on = runtimeWith({ dir, options: ON, clock })                      // and ticks again
+  assert.equal(on.rpcOpts().remoteSteering(), true)
+  assert.equal(on.runtime.snapshot().remote_steering_auto_off.problem, '')
+})
+
+test('#41 a successful options save after auto-off leaves no marker: the owner can turn steering on again', () => {
+  const dir = tmp()
+  const clock = { t: T0 }
+  const first = runtimeWith({ dir, options: ON, clock })
+  clock.t = T0 + 2 * H
+  assert.equal(first.rpcOpts().remoteSteering(), false)
+  assert.equal(first.saved.at(-1).remote_steering, false)
+  clock.t = T0 + 3 * H
+  // The panel saves remote_steering: true again, and SignalK restarts the plugin.
+  const on = runtimeWith({ dir, options: ON, clock })
+  assert.equal(on.rpcOpts().remoteSteering(), true)
+})
+
+test('#41 read-only data dir with a stale start time: auto-off firing at once says it is not durable', { skip: !nonRoot && 'needs a non-root POSIX user' }, () => {
+  const dir = tmp()
+  const clock = { t: T0 }
+  runtimeWith({ dir, options: ON, clock })            // start time T0 on disk
+  readOnly(dir, () => {
+    clock.t = T0 + 3 * H
+    runtimeWith({ dir, options: { ...ON, remote_steering: false }, clock })  // off: the clear cannot be saved
+    const h = runtimeWith({ dir, options: ON, clock, saveFails: true })     // on again
+    assert.equal(h.rpcOpts().remoteSteering(), false)
+    const auto = h.runtime.snapshot().remote_steering_auto_off
+    assert.equal(auto.problem, 'not_durable')
+    assert.match(auto.problem_text, /cannot be saved/)
+    assert.match(h.statuses.join('\n'), /switched off automatically.*cannot be saved/)
+  })
+})
+
+test('#41 the clock offset leaves out the deadline lead', async () => {
+  const { rpc } = rpcWith()
+  await rpc.handle(put(T0 + 40_000))
+  const c = rpc.stats().clock_problem
+  assert.equal(c.offset_s, 25)
+  assert.match(c.text, /about 25 s slow/)
+})
+
+function rpcLimited () {
+  const statuses = []
+  const rpc = createRpcServer({
+    app: { putSelfPath: () => Promise.resolve({ state: 'COMPLETED', statusCode: 200 }) },
+    publish: async () => {},
+    boatId: () => 'b_1',
+    now: () => T0,
+    remoteSteering: () => true,
+    setStatus: (m) => statuses.push(m),
+    audit: () => {},
+    limits: { max_per_min: 1 }
+  })
+  return { rpc, statuses }
+}
+
+test('#41 an expired put past the rate limit (a stale queued flood) does not set the clock problem', async () => {
+  const { rpc, statuses } = rpcLimited()
+  await rpc.handle(put(T0 + 4000))                  // admitted: fills the rate window
+  statuses.length = 0
+  await rpc.handle(put(T0 - 30_000))
+  assert.equal(rpc.stats().clock_problem, null)
+  assert.doesNotMatch(statuses.join('\n'), /clock/i)
+})
+
+test('#41 a deadline_too_far put past the rate limit does not set the clock problem', async () => {
+  const { rpc } = rpcLimited()
+  await rpc.handle(put(T0 + 4000))
+  await rpc.handle(put(T0 + 40_000))
   assert.equal(rpc.stats().clock_problem, null)
 })
