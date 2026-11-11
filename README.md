@@ -250,8 +250,10 @@ and your own autopilot plugin carries them out.
   so it survives restarts. If that folder is missing or read-only, the time cannot be
   kept, so with auto-off set remote steering **stays off** (fails closed) and the plugin
   status and the panel say why; make the folder writable (or set auto-off to 0) and
-  restart the plugin. The plugin status and the panel say when it will switch off or
-  when it did.
+  restart the plugin. If auto-off fires but the options cannot be saved, the folder
+  keeps a marker and remote steering stays off after a restart too; untick the switch,
+  save, and tick it again to start a new period. The plugin status and the panel say
+  when it will switch off or when it did.
 - **Boat clock.** Each command carries a deadline at most 15 s ahead. If the boat's clock
   is off by more than about 10 s, commands are refused (`deadline_too_far`, clock slow)
   or dropped (`expired`, clock fast), `standby` included. The plugin status and the panel
