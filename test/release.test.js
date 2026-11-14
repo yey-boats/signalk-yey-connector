@@ -25,9 +25,9 @@ test('CHANGELOG: an Unreleased section and one per released version, newest firs
   assert.deepEqual(released, [...released].sort((a, b) => key(b) - key(a)))
 })
 
-test('CHANGELOG: Unreleased names the merged follow-ups', () => {
+test('CHANGELOG: 0.5.0 names the follow-ups it shipped', () => {
   const { section } = require('../scripts/changelog-section')
-  const unreleased = section(read('CHANGELOG.md'), 'Unreleased')
+  const unreleased = section(read('CHANGELOG.md'), '0.5.0')
   for (const n of ['#29', '#31', '#32', '#34']) assert.ok(unreleased.includes(n), n)
 })
 
