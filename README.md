@@ -263,6 +263,32 @@ and your own autopilot plugin carries them out.
   plugin restarts and refuses all commands), or switch it off in the yey.boats app, or
   switch the plugin off.
 
+## Dashboards from yey.boats (for other plugins)
+
+Other plugins on this server (for example the Instruments-manager Display
+Manager) can list and fetch the boat owner's saved yey.boats MIDL dashboards
+through SignalK's resources API, as the custom resource type `yey-dashboards`.
+The connector asks yey.boats over its existing connection each time (the list
+is cached for 30 s). This is the owner's own data coming to the boat; nothing
+is sent from the boat for it.
+
+```js
+// { [id]: { name, title, targetClass, updatedAt } }
+const list = await app.resourcesApi.listResources('yey-dashboards', {})
+
+// { id, name, title, targetClass, updatedAt, doc }  (doc: MIDL as JSON or YAML text)
+const dash = await app.resourcesApi.getResource('yey-dashboards', Object.keys(list)[0])
+```
+
+Read-only: create and edit dashboards on yey.boats; `setResource` and
+`deleteResource` are refused. When the boat is not connected to yey.boats the
+connector refuses with `not connected to yey.boats`. Note that the SignalK
+server's resources API merges answers from all providers and drops a provider's
+refusal, so another plugin sees an empty list (or `{}` for a dashboard) rather
+than the error; the connector's status shows why. The same data is also
+readable at `/signalk/v2/api/resources/yey-dashboards` by anyone this SignalK
+server lets read resources.
+
 ## Requirements
 
 Node >= 20.10 (the floor SignalK itself declares), SignalK server 2.x, and an outbound

@@ -51,6 +51,19 @@ section for that version below becomes the GitHub release notes.
 ### Docs
 - README: hard-reload the admin page after install, including Safari (#19).
 
+## [0.5.0] - 2026-11-14
+
+Dashboards from yey.boats for other plugins on the boat.
+
+- **`yey-dashboards` resource type.** The connector registers a SignalK
+  resource provider, so other plugins (first: the Instruments-manager Display
+  Manager) can list and fetch the owner's saved yey.boats MIDL dashboards with
+  `app.resourcesApi.listResources('yey-dashboards', {})` and
+  `getResource('yey-dashboards', id)`. Answers come from yey.boats over the
+  paired uplink (`yey.boat.dashboards`, ops `list` / `get`); the list is cached
+  for 30 s and never across a re-pair. Read-only; refused with
+  `not connected to yey.boats` when the boat is not connected.
+
 ## [0.4.0] - 2026-11-08
 
 Remote steering from yey.boats: autopilot only, and off until you turn it on,
@@ -115,7 +128,8 @@ SignalK server to yey.boats, paired with a code from
 https://yey.boats/setup?source=plugin. End-to-end tests against the simulator
 and a cross-repo plan contract test.
 
-[Unreleased]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.1.0...v0.2.0
