@@ -117,6 +117,21 @@ test('confirm pairs at pair_url with the confirmed identity, stores privately an
   h.runtime.stop()
 })
 
+test('pairing (adopt) forgets any yey.boats dashboards grant left in the state file', async () => {
+  const h = harness()
+  fs.writeFileSync(h.stateFile, JSON.stringify({
+    dashboards_grant: { grant: 'gr_old_pairing', user_label: 'Old', expires_at: '' }
+  }))
+  await h.runtime.start()
+  await h.runtime.resolveConnection({ url: URL_CODE })
+  await h.runtime.confirmConnection({ identity: { name: 'Sara' } })
+  const saved = JSON.parse(fs.readFileSync(h.stateFile, 'utf8'))
+  assert.equal(saved.boat_id, 'b_7')
+  assert.equal(saved.dashboards_grant, null)
+  assert.equal(h.runtime.snapshot().dashboards.linked, false)
+  h.runtime.stop()
+})
+
 test('a restart after connecting comes up connected from private state alone', async () => {
   const h = harness()
   await h.runtime.start()
