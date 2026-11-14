@@ -93,8 +93,8 @@ GitHub.
 
    ```bash
    cd ~/.signalk
-   curl -fLO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.5.0/signalk-yey-connector-0.5.0.tgz
-   npm install ./signalk-yey-connector-0.5.0.tgz
+   curl -fLO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.5.1/signalk-yey-connector-0.5.1.tgz
+   npm install ./signalk-yey-connector-0.5.1.tgz
    ```
 
    (Already downloaded it elsewhere? `npm install /path/to/signalk-yey-connector-<version>.tgz`.)
@@ -111,8 +111,8 @@ with its own connection panel. To update, do the same with the newer release.
 with your container's name):
 
 ```bash
-docker cp signalk-yey-connector-0.5.0.tgz signalk:/tmp/
-docker exec -w /home/node/.signalk signalk npm install /tmp/signalk-yey-connector-0.5.0.tgz
+docker cp signalk-yey-connector-0.5.1.tgz signalk:/tmp/
+docker exec -w /home/node/.signalk signalk npm install /tmp/signalk-yey-connector-0.5.1.tgz
 docker restart signalk
 ```
 
@@ -271,12 +271,14 @@ board proves a yey.boats login (the boat's owner or crew). The boat's pairing
 is not enough, and the dashboards are **not** on SignalK's resources API: a
 guest with SignalK read access (say, on the boat's Wi-Fi) cannot reach them.
 
-While the plugin runs it offers an in-process API as `app.yeyDashboards`
-(removed again when the plugin stops). Every method returns a Promise; a
+While the plugin runs it offers an in-process API, published process-wide as
+`globalThis[Symbol.for('yey-boats.dashboards')]` (removed again when the plugin
+stops). SignalK gives each plugin its own shallow copy of `app`, so another
+plugin can't see a property set on ours; read the symbol instead. Every method returns a Promise; a
 failure is a rejection whose `err.code` says why.
 
 ```js
-const yd = app.yeyDashboards // undefined when the connector is not running
+const yd = globalThis[Symbol.for('yey-boats.dashboards')] // undefined when the connector is not running
 
 await yd.state()
 // { connected, linked, user_label, expires_at,

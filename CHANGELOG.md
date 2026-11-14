@@ -8,6 +8,14 @@ section for that version below becomes the GitHub release notes.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-14
+
+### Fixed
+- The dashboards API is now published as
+  `globalThis[Symbol.for('yey-boats.dashboards')]`: SignalK gives each plugin
+  its own shallow copy of `app`, so `app.yeyDashboards` (0.5.0) was invisible
+  to Display Manager. `app.yeyDashboards` stays on our own copy.
+
 ## [0.5.0] - 2026-11-14
 
 Dashboards from yey.boats for other plugins on the boat.
@@ -134,7 +142,8 @@ SignalK server to yey.boats, paired with a code from
 https://yey.boats/setup?source=plugin. End-to-end tests against the simulator
 and a cross-repo plan contract test.
 
-[Unreleased]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.2.0...v0.3.0

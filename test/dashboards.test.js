@@ -391,8 +391,14 @@ test('plugin start sets app.yeyDashboards with Promise methods; stop deletes it'
   assert.equal(s.linked, false)
   await assert.rejects(api.list(), { code: 'not_connected' })
   await assert.rejects(api.linkStart(), { code: 'not_connected' })
+  // Other plugins get their own shallow copy of app, so the API is published
+  // process-wide too (signalk-server interfaces/plugins.js).
+  assert.equal(globalThis[Symbol.for('yey-boats.dashboards')], api)
+  const otherPluginsApp = Object.assign({}, { debug: () => {} })
+  assert.equal(otherPluginsApp.yeyDashboards, undefined, 'a copied app does not see it')
   plugin.stop()
   assert.equal('yeyDashboards' in app, false)
+  assert.equal(globalThis[Symbol.for('yey-boats.dashboards')], undefined)
   await assert.rejects(api.get('d1'), { code: 'not_connected' }, 'a kept reference rejects while stopped')
 })
 

@@ -28,6 +28,14 @@ function loadRuntime () {
   return createRuntime
 }
 
+// SignalK gives every plugin its OWN shallow copy of `app`
+// (signalk-server interfaces/plugins.js: lodash.assign({}, app, ...)), so a
+// property set on ours is invisible to every other plugin. The dashboards API
+// is therefore published process-wide under this well-known symbol; other
+// plugins read globalThis[Symbol.for('yey-boats.dashboards')]. It stays
+// in-process: nothing here is reachable over HTTP.
+const DASHBOARDS_KEY = Symbol.for('yey-boats.dashboards')
+
 module.exports = function signalkYeyConnectorPlugin (app) {
   let runtime
 
@@ -133,6 +141,7 @@ module.exports = function signalkYeyConnectorPlugin (app) {
     start: (options) => {
       runtime = loadRuntime()({ app, options: options || {}, version: pkg.version })
       if (app) app.yeyDashboards = yeyDashboards
+      globalThis[DASHBOARDS_KEY] = yeyDashboards
       // start() is async: it returns the first connect cycle. SignalK ignores the
       // return value, and the supervisor already funnels a failed dial into its
       // own retry curve — so the only thing left to do here is make sure an
@@ -145,6 +154,7 @@ module.exports = function signalkYeyConnectorPlugin (app) {
 
     stop: () => {
       if (app && app.yeyDashboards === yeyDashboards) delete app.yeyDashboards
+      if (globalThis[DASHBOARDS_KEY] === yeyDashboards) delete globalThis[DASHBOARDS_KEY]
       if (runtime) runtime.stop()
       runtime = undefined
     },
