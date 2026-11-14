@@ -266,28 +266,60 @@ and your own autopilot plugin carries them out.
 ## Dashboards from yey.boats (for other plugins)
 
 Other plugins on this server (for example the Instruments-manager Display
-Manager) can list and fetch the boat owner's saved yey.boats MIDL dashboards
-through SignalK's resources API, as the custom resource type `yey-dashboards`.
-The connector asks yey.boats over its existing connection each time (the list
-is cached for 30 s). This is the owner's own data coming to the boat; nothing
-is sent from the boat for it.
+Manager) can read saved yey.boats MIDL dashboards, but only after someone on
+board proves a yey.boats login (the boat's owner or crew). The boat's pairing
+is not enough, and the dashboards are **not** on SignalK's resources API: a
+guest with SignalK read access (say, on the boat's Wi-Fi) cannot reach them.
+
+While the plugin runs it offers an in-process API as `app.yeyDashboards`
+(removed again when the plugin stops). Every method returns a Promise; a
+failure is a rejection whose `err.code` says why.
 
 ```js
-// { [id]: { name, title, targetClass, updatedAt } }
-const list = await app.resourcesApi.listResources('yey-dashboards', {})
+const yd = app.yeyDashboards // undefined when the connector is not running
 
-// { id, name, title, targetClass, updatedAt, doc }  (doc: MIDL as JSON or YAML text)
-const dash = await app.resourcesApi.getResource('yey-dashboards', Object.keys(list)[0])
+await yd.state()
+// { connected, linked, user_label, expires_at,
+//   pending: { code, verify_url, expires_at } | null }
+
+// 1. Link a yey.boats login: show the code and the URL to the person on board,
+//    who opens verify_url while signed in to yey.boats and approves the code.
+const { code, verify_url, expires_at } = await yd.linkStart()
+
+// 2. Poll until it is answered (every few seconds, until expires_at).
+await yd.linkPoll() // { status: 'pending' | 'approved' | 'rejected' | 'expired',
+                    //   user_label?, expires_at? }   (the last two when approved)
+
+// 3. Read that user's dashboards.
+const { dashboards, user_label } = await yd.list()
+//    dashboards: [{ id, title, targetClass, updatedAt }]   (cached for 30 s)
+const dash = await yd.get(dashboards[0].id)
+//    { id, title, targetClass, updatedAt, doc }            (doc: the MIDL document)
+
+// 4. Give the login back.
+await yd.unlink() // { linked: false }
 ```
 
-Read-only: create and edit dashboards on yey.boats; `setResource` and
-`deleteResource` are refused. When the boat is not connected to yey.boats the
-connector refuses with `not connected to yey.boats`. Note that the SignalK
-server's resources API merges answers from all providers and drops a provider's
-refusal, so another plugin sees an empty list (or `{}` for a dashboard) rather
-than the error; the connector's status shows why. The same data is also
-readable at `/signalk/v2/api/resources/yey-dashboards` by anyone this SignalK
-server lets read resources.
+The connector holds at most one linked login at a time; a new approval
+replaces the old one. It is kept in the connector's private state file (owner
+read/write only), so it survives a restart, until its `expires_at`, an
+`unlink()`, or the boat being disconnected or connected again, which all forget
+it. The connector's status shows only `{ linked, user_label, expires_at }` and
+whether a link is waiting, never the code or the grant itself.
+
+| `err.code` | Meaning |
+|---|---|
+| `not_connected` | The boat is not connected to yey.boats (or the connector is stopped). |
+| `not_linked` | No yey.boats login is linked, or it has expired. Call `linkStart()`. |
+| `grant_invalid` | yey.boats no longer honours the link (expired there, or that user lost access to the boat). It is forgotten here; link again. |
+| `no_pending_link` | `linkPoll()` with no link waiting (or the link was replaced). |
+| `not_found` | `get(id)`: no such dashboard for this user. |
+| `bad_request` | A missing or malformed argument. |
+| `bad_reply` | yey.boats answered something unexpected. |
+| other | A refusal from yey.boats keeps its code (for example `reply_timeout`). |
+
+`unlink()` forgets the login on the boat first, even when telling yey.boats
+fails (it still rejects with that failure).
 
 ## Requirements
 

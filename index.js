@@ -15,8 +15,6 @@ const pkg = require('./package.json')
 // Routes are safe to require at load: lib/routes.js pulls in nothing but node
 // builtins, so it cannot make this entry file unloadable.
 const { registerRoutes, jsonBody } = require('./lib/routes')
-// Node builtins only, like routes: safe at load.
-const { registerDashboardsProvider } = require('./lib/dashboards')
 
 // The runtime is required lazily, inside start(), rather than at module load.
 // Requiring it here would make this entry file unloadable whenever lib/ is
@@ -33,10 +31,26 @@ function loadRuntime () {
 module.exports = function signalkYeyConnectorPlugin (app) {
   let runtime
 
+  // app.yeyDashboards: yey.boats dashboards for other plugins on this server,
+  // in-process only (never the resources API: SignalK read access, e.g. a
+  // guest on the boat's Wi-Fi, must not reach them). Every method forwards to
+  // the CURRENT runtime, so a reference kept across a plugin restart still
+  // works; while stopped they reject with code `not_connected`.
   const stopped = () => Promise.reject(Object.assign(
     new Error('not connected to yey.boats'), { code: 'not_connected' }))
-  const STOPPED = { listResources: stopped, getResource: stopped, setResource: stopped, deleteResource: stopped }
-  const current = () => (runtime && runtime.dashboards ? runtime.dashboards.methods : STOPPED)
+  const forward = (name) => (...args) => {
+    const api = runtime && runtime.dashboards
+    if (!api) return stopped()
+    try { return Promise.resolve(api[name](...args)) } catch (err) { return Promise.reject(err) }
+  }
+  const yeyDashboards = Object.freeze({
+    state: forward('state'),
+    linkStart: forward('linkStart'),
+    linkPoll: forward('linkPoll'),
+    list: forward('list'),
+    get: forward('get'),
+    unlink: forward('unlink')
+  })
 
   const plugin = {
     id: 'signalk-yey-connector',
@@ -118,19 +132,7 @@ module.exports = function signalkYeyConnectorPlugin (app) {
 
     start: (options) => {
       runtime = loadRuntime()({ app, options: options || {}, version: pkg.version })
-      // The owner's yey.boats dashboards, for other plugins, through the
-      // resources API (type `yey-dashboards`). Registered whether or not the
-      // boat is paired: an unpaired boat answers "not connected to yey.boats".
-      // SignalK unregisters it itself when it stops this plugin. The provider
-      // reads the CURRENT runtime, so a restart never leaves a stale one behind.
-      registerDashboardsProvider(app, {
-        methods: {
-          listResources: (q) => current().listResources(q),
-          getResource: (id, prop) => current().getResource(id, prop),
-          setResource: (id, v) => current().setResource(id, v),
-          deleteResource: (id) => current().deleteResource(id)
-        }
-      }, (msg) => app.debug(msg))
+      if (app) app.yeyDashboards = yeyDashboards
       // start() is async: it returns the first connect cycle. SignalK ignores the
       // return value, and the supervisor already funnels a failed dial into its
       // own retry curve — so the only thing left to do here is make sure an
@@ -142,6 +144,7 @@ module.exports = function signalkYeyConnectorPlugin (app) {
     },
 
     stop: () => {
+      if (app && app.yeyDashboards === yeyDashboards) delete app.yeyDashboards
       if (runtime) runtime.stop()
       runtime = undefined
     },
