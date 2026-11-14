@@ -93,8 +93,8 @@ GitHub.
 
    ```bash
    cd ~/.signalk
-   curl -fLO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.4.0/signalk-yey-connector-0.4.0.tgz
-   npm install ./signalk-yey-connector-0.4.0.tgz
+   curl -fLO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.5.0/signalk-yey-connector-0.5.0.tgz
+   npm install ./signalk-yey-connector-0.5.0.tgz
    ```
 
    (Already downloaded it elsewhere? `npm install /path/to/signalk-yey-connector-<version>.tgz`.)
@@ -111,8 +111,8 @@ with its own connection panel. To update, do the same with the newer release.
 with your container's name):
 
 ```bash
-docker cp signalk-yey-connector-0.4.0.tgz signalk:/tmp/
-docker exec -w /home/node/.signalk signalk npm install /tmp/signalk-yey-connector-0.4.0.tgz
+docker cp signalk-yey-connector-0.5.0.tgz signalk:/tmp/
+docker exec -w /home/node/.signalk signalk npm install /tmp/signalk-yey-connector-0.5.0.tgz
 docker restart signalk
 ```
 

@@ -8,6 +8,25 @@ section for that version below becomes the GitHub release notes.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-14
+
+Dashboards from yey.boats for other plugins on the boat.
+
+- **`app.yeyDashboards`: yey.boats dashboards behind a yey.boats login.**
+  Other plugins on the server (first: the Instruments-manager Display Manager)
+  can read saved yey.boats MIDL dashboards in-process with
+  `state()`, `linkStart()`, `linkPoll()`, `list()`, `get(id)` and `unlink()`.
+  Someone on board must first link a yey.boats login (owner or crew) by
+  approving a short code on yey.boats; the boat's pairing alone is not enough,
+  and the dashboards are deliberately not on SignalK's resources API, so
+  SignalK read access (a guest on the boat's Wi-Fi) does not reach them. The
+  connector holds at most one grant, in its private state file (survives a
+  restart; forgotten on expiry, `unlink()`, `grant_invalid`, disconnect or
+  re-pair), and never logs or shows it: status shows only
+  `{linked, user_label, expires_at}`. Everything goes over the paired uplink
+  (`yey.boat.dashboards`, ops `link_start`, `link_poll`, `list`, `get`,
+  `unlink`); the list is cached for 30 s per grant.
+
 ### Security
 - Credential state and buffer lanes are written owner-only (0600); a stale
   temporary file is removed before the credential is written (#29).
@@ -50,25 +69,6 @@ section for that version below becomes the GitHub release notes.
 
 ### Docs
 - README: hard-reload the admin page after install, including Safari (#19).
-
-## [0.5.0] - 2026-11-14
-
-Dashboards from yey.boats for other plugins on the boat.
-
-- **`app.yeyDashboards`: yey.boats dashboards behind a yey.boats login.**
-  Other plugins on the server (first: the Instruments-manager Display Manager)
-  can read saved yey.boats MIDL dashboards in-process with
-  `state()`, `linkStart()`, `linkPoll()`, `list()`, `get(id)` and `unlink()`.
-  Someone on board must first link a yey.boats login (owner or crew) by
-  approving a short code on yey.boats; the boat's pairing alone is not enough,
-  and the dashboards are deliberately not on SignalK's resources API, so
-  SignalK read access (a guest on the boat's Wi-Fi) does not reach them. The
-  connector holds at most one grant, in its private state file (survives a
-  restart; forgotten on expiry, `unlink()`, `grant_invalid`, disconnect or
-  re-pair), and never logs or shows it: status shows only
-  `{linked, user_label, expires_at}`. Everything goes over the paired uplink
-  (`yey.boat.dashboards`, ops `link_start`, `link_poll`, `list`, `get`,
-  `unlink`); the list is cached for 30 s per grant.
 
 ## [0.4.0] - 2026-11-08
 
