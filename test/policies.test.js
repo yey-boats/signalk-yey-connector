@@ -262,3 +262,23 @@ test('applyRound leaves non-numeric members of an object alone', () => {
     { state: 'alarm', message: 'MOB', value: 1.23456 })
   assert.deepEqual(out, { state: 'alarm', message: 'MOB', value: 1.23 })
 })
+
+
+test('locality null invalidations bypass cadence but preserve policy-off and unrelated null behavior', () => {
+  for (const name of ['self', 'destination', 'layline', 'targets']) {
+    const sample = { path: `navigation.locality.${name}`, value: null }
+    const state = { lastEmitMs: 1000, lastValue: { text: 'old' } }
+    for (const policy of ['periodic', 'on_change']) {
+      const mapping = { policy, interval_s: 600, min_interval_s: 600 }
+      assert.deepEqual(decide({ mapping, state, sample, nowMs: 1001 }), { emit: true, reason: 'change' })
+      assert.equal(decide({ mapping, state: {}, sample, nowMs: 1001 }).emit, true)
+      assert.equal(decide({ mapping, state: { ...state, lastValue: null }, sample, nowMs: 1001 }).emit, false)
+      assert.equal(decide({ mapping, state: { ...state, lastValue: null }, sample: { ...sample, value: { text: 'recovered' } }, nowMs: 601001 }).emit, true)
+    }
+    assert.deepEqual(decide({ mapping: { policy: 'off' }, state, sample, nowMs: 1001 }), { emit: false, reason: 'off' })
+  }
+  for (const path of ['navigation.position', 'navigation.locality.other', 'navigation.locality.self.text']) {
+    assert.deepEqual(decide({ sample: { path, value: null } }), { emit: false, reason: 'no_value' })
+  }
+  assert.equal(decide({ sample: { path: 'navigation.locality.self', value: undefined } }).emit, false)
+})
