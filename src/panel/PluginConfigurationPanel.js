@@ -192,6 +192,8 @@ export default function PluginConfigurationPanel (props) {
   // Remote steering: the owner's own switch, off unless saved as exactly true.
   const [steering, setSteering] = useState(configuration.remote_steering === true)
   const [autoOffHours, setAutoOffHours] = useState(configuration.remote_steering_auto_off_hours || 0)
+  // Dashboards from yey.boats: the owner's own switch, ON unless saved as exactly false.
+  const [cloudDashboards, setCloudDashboards] = useState(configuration.allow_cloud_dashboards !== false)
   const [savedNote, setSavedNote] = useState('')
 
   const refresh = useCallback(async () => {
@@ -364,6 +366,7 @@ export default function PluginConfigurationPanel (props) {
       ...configuration,
       remote_steering: steering === true,
       remote_steering_auto_off_hours: Math.max(0, Number(autoOffHours) || 0),
+      allow_cloud_dashboards: cloudDashboards === true,
       advanced: { ...advanced, deny: list, bufferMegabytes: mb }
     }
     delete next.key
@@ -536,6 +539,19 @@ export default function PluginConfigurationPanel (props) {
             value: bufferMb, onChange: (e) => setBufferMb(e.target.value)
           }),
           'Kept on this server while there is no internet, sent when it is back.'),
+        h('div', { className: 'form-check mb-1' },
+          h('input', {
+            id: 'yey-cloud-dashboards', className: 'form-check-input', type: 'checkbox',
+            checked: cloudDashboards, onChange: (e) => setCloudDashboards(e.target.checked)
+          }),
+          h('label', { className: 'form-check-label', htmlFor: 'yey-cloud-dashboards' },
+            'Allow dashboards from yey.boats')),
+        h('div', { className: 'form-text mb-3' },
+          'On by default. Lets the boat\'s owner put a dashboard on this boat\'s displays from ' +
+          'yey.boats (through Display Manager). It only changes what a display shows. ' +
+          'Untick and Save to refuse them.',
+          status && status.rpc && status.rpc.last_dashboard
+            ? h('div', { className: 'mt-1' }, 'Last: ' + status.rpc.last_dashboard) : null),
         h('div', { className: 'form-check mb-1' },
           h('input', {
             id: 'yey-remote-steering', className: 'form-check-input', type: 'checkbox',

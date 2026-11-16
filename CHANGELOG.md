@@ -8,6 +8,39 @@ section for that version below becomes the GitHub release notes.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-16
+
+Dashboards from yey.boats on the boat's displays (display provisioning
+contract v1, §1).
+
+### Added
+- **RPC op `show_dashboard`**: the boat's owner can put one of their saved
+  yey.boats dashboards on this boat's displays from yey.boats. The connector
+  hands it to Display Manager in-process
+  (`globalThis[Symbol.for('yey-boats.display-manager')]`, `showDashboard`),
+  which imports it as a preset and shows it; the reply carries the preset and
+  a per-display `state` (`shown`, `queued`, `refused`, `unknown_display`).
+  Checked on the boat, every time, in one place (`lib/dashboard-policy.js`):
+  the owner's switch, the same envelope checks as remote steering (`boat_id`,
+  `deadline_ms` at most 30 s ahead, a request id remembered on disk in
+  `yey-dashboards-replay.json`, 0600), the arguments' shape, the doc at most
+  48 KiB, 6 shows a minute (separate from steering), Display Manager present,
+  and a 15 s hand-off timeout. Every show, accepted or refused, is noted in the
+  server log and the plugin status line.
+- **RPC op `displays`**: the displays Display Manager has registered (name,
+  class, online, current screen and preset), or `available: false` with
+  `reason: display_manager_missing`.
+- **Option `allow_cloud_dashboards`** (*Allow dashboards from yey.boats*,
+  default **on**), in the plugin schema and the panel's **Advanced** section.
+  Untick it to refuse every show (`cloud_dashboards_off`).
+- Refusal codes `cloud_dashboards_off` and `invalid_dashboard` (Display
+  Manager's validator refused the doc; `detail` carries its message).
+- `capabilities` reports `cloud_dashboards: {enabled, version: 1, policy}`.
+
+### Changed
+- The envelope and replay-memory checks of remote steering moved to
+  `lib/request-guard.js`, shared with cloud dashboards; behaviour unchanged.
+
 ## [0.5.1] - 2026-11-14
 
 ### Fixed
@@ -142,7 +175,8 @@ SignalK server to yey.boats, paired with a code from
 https://yey.boats/setup?source=plugin. End-to-end tests against the simulator
 and a cross-repo plan contract test.
 
-[Unreleased]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/yey-boats/signalk-yey-connector/compare/v0.3.0...v0.4.0
