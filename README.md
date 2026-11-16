@@ -57,8 +57,10 @@ on the boat. The plugin reads SignalK in-process, so there is no SignalK token t
   history provider) the history of a single path, when the navigator needs it to answer
   you. The boat answers only paths inside your consent that the plan either sends or marks
   *on request*, never a denied path, never a write or control (those are refused, except
-  autopilot commands when you have turned on [remote steering](#remote-steering)), at most
-  30 a minute, each answer capped at 64 KB.
+  autopilot commands when you have turned on [remote steering](#remote-steering), and
+  dashboards the owner [puts on your displays](#dashboards-from-yeyboats-on-your-displays)),
+  at most 30 a minute, each answer capped at 64 KB. When asked, the boat also lists its
+  displays (names, classes, what they show) for that feature.
 - Values that could not be sent during an outage are buffered on the boat (50 MB by
   default) and replayed when the link comes back. The same consent and deny rules apply
   to the replay.
@@ -93,8 +95,8 @@ GitHub.
 
    ```bash
    cd ~/.signalk
-   curl -fLO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.5.1/signalk-yey-connector-0.5.1.tgz
-   npm install ./signalk-yey-connector-0.5.1.tgz
+   curl -fLO https://github.com/yey-boats/signalk-yey-connector/releases/download/v0.6.0/signalk-yey-connector-0.6.0.tgz
+   npm install ./signalk-yey-connector-0.6.0.tgz
    ```
 
    (Already downloaded it elsewhere? `npm install /path/to/signalk-yey-connector-<version>.tgz`.)
@@ -111,8 +113,8 @@ with its own connection panel. To update, do the same with the newer release.
 with your container's name):
 
 ```bash
-docker cp signalk-yey-connector-0.5.1.tgz signalk:/tmp/
-docker exec -w /home/node/.signalk signalk npm install /tmp/signalk-yey-connector-0.5.1.tgz
+docker cp signalk-yey-connector-0.6.0.tgz signalk:/tmp/
+docker exec -w /home/node/.signalk signalk npm install /tmp/signalk-yey-connector-0.6.0.tgz
 docker restart signalk
 ```
 
@@ -190,6 +192,7 @@ The panel replaces the generated settings form. What it writes:
 | `remote_steering` | `false` | Allow remote steering from yey.boats, autopilot only. See [Remote steering](#remote-steering). Also under **Advanced**. |
 | `allow_custom_origin` | `false` | *(not in the panel)* Accept connection links from an https site other than yey.boats, for a server you run yourself. While it is on, the plugin status and the panel show a warning. |
 | `remote_steering_auto_off_hours` | `0` | Switch remote steering off this many hours after it was turned on; 0 = never. Also under **Advanced**. |
+| `allow_cloud_dashboards` | `true` | Allow dashboards from yey.boats: lets the boat's owner put a dashboard on this boat's displays from yey.boats. See [Dashboards from yey.boats on your displays](#dashboards-from-yeyboats-on-your-displays). Also under **Advanced**. |
 
 Switching the plugin off in Plugin Config stops sending.
 
@@ -262,6 +265,46 @@ and your own autopilot plugin carries them out.
 - **To turn it off:** untick the setting under **Advanced** and press **Save** (the
   plugin restarts and refuses all commands), or switch it off in the yey.boats app, or
   switch the plugin off.
+
+## Dashboards from yey.boats on your displays
+
+On by default. The boat's owner can pick one of their saved yey.boats dashboards
+(in the dashboard builder, the chat or Claude) and put it on this boat's displays. The
+connector hands it to the Display Manager plugin on this server, which adds it as a
+preset and shows it, or queues it for a display that is offline. Only the owner can send
+one (yey.boats checks; crew can build dashboards but not provision them), and it only
+changes what a display shows: nothing is written to SignalK.
+
+- **The switch:** *Allow dashboards from yey.boats* (option `allow_cloud_dashboards`,
+  default on, panel **Advanced**). Untick and Save to refuse every show
+  (`cloud_dashboards_off`). The cloud cannot change it.
+- **Checked on the boat, every time** (`lib/dashboard-policy.js`), in this order: the
+  switch; the request names this boat (`boat_id`) and carries a deadline at most 30 s
+  ahead (`deadline_ms`), and its id was never seen before (remembered in
+  `yey-dashboards-replay.json`, mode 0600, so a replay is dropped after a restart too);
+  well-formed arguments; the dashboard at most 48 KiB as JSON (Display Manager's limit,
+  `too_large`); at most 6 a minute (`rate_limited`, separate from remote steering);
+  Display Manager installed (`unsupported`, `display_manager_missing`); then Display
+  Manager has 15 s (`timeout`). If its validator refuses the dashboard the reply is
+  `invalid_dashboard` with its message; a display that cannot show it is `refused`
+  with the reason, the others still get it.
+- **Request size.** A show carries the whole dashboard, so a request can be about
+  50 KiB. Nothing on the boat caps inbound requests below that: the Socket.IO client
+  sets no `maxPayload` of its own (the `ws` default, 100 MiB, applies), and the reply
+  cap (64 KiB) is far above a show's reply. The cloud's request cap for
+  `show_dashboard` must be at least 56 KiB.
+- **Trail.** Every show, accepted or refused, goes to the server log (debug) and the
+  plugin status line, for example
+  `Dashboard from yey.boats: "Wind history" on yey-d-28372f8a0290 accepted (shown 1), asked by the boat's owner 12:03`.
+  Display Manager keeps its own audit of what it showed.
+- **What the displays are** (`displays` request, also not gated by the switch: it only
+  lists displays and says whether the switch is on): id, name, class, online, the screen
+  and preset shown now.
+
+Display Manager offers the in-process API this uses as
+`globalThis[Symbol.for('yey-boats.display-manager')]` = `{ version: 1, listDisplays(),
+showDashboard({ sourceId, title, updatedAt, doc, screen, displayIds, requestedBy }) }`,
+where `displayIds` is an array of display ids or the string `'all'`.
 
 ## Dashboards from yey.boats (for other plugins)
 

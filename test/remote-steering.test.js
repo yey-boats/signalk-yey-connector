@@ -394,6 +394,11 @@ test('capabilities reflects the option and names the allowlist', async () => {
           policy_version: POLICY_VERSION,
           policy: describePolicy()
         },
+        cloud_dashboards: {
+          enabled: true,
+          version: 1,
+          policy: require('../lib/dashboard-policy').describePolicy()
+        },
         connector_version: pkg.version
       }
     })

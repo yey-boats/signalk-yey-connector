@@ -102,6 +102,16 @@ module.exports = function signalkYeyConnectorPlugin (app) {
             'Untick to switch it off immediately.',
           default: false
         },
+        allow_cloud_dashboards: {
+          type: 'boolean',
+          title: 'Allow dashboards from yey.boats',
+          description:
+            'On by default. Lets the boat\'s owner put a dashboard on this boat\'s displays ' +
+            'from yey.boats (through Display Manager): it changes what a display shows, ' +
+            'nothing else, and only the owner\'s own saved dashboards can be sent. Every ' +
+            'show is noted in the plugin status. Untick to refuse them all.',
+          default: true
+        },
         allow_custom_origin: {
           type: 'boolean',
           title: 'Accept connection links from sites other than yey.boats',
