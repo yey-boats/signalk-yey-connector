@@ -265,6 +265,14 @@ test('malformed arguments are bad_request naming the field, before Display Manag
     [{ display_ids: [7] }, {}, 'display_ids'],
     [{ display_ids: ['all', 'yey-d-1'] }, {}, 'display_ids'],
     [{ display_ids: Array.from({ length: 33 }, (_, i) => `d${i}`) }, {}, 'display_ids'],
+    // Instruments-manager #88: a display id that names an Object.prototype
+    // member (or is not Display Manager's id form) never leaves the connector.
+    [{ display_ids: ['__proto__'] }, {}, 'display_ids'],
+    [{ display_ids: ['constructor'] }, {}, 'display_ids'],
+    [{ display_ids: ['yey-d-1', 'prototype'] }, {}, 'display_ids'],
+    [{ display_ids: ['hasOwnProperty'] }, {}, 'display_ids'],
+    [{ display_ids: ['../registry'] }, {}, 'display_ids'],
+    [{ display_ids: ['Yey D 1'] }, {}, 'display_ids'],
     [{ dashboard: 'x' }, {}, 'dashboard'],
     [{}, { source_id: '' }, 'dashboard.source_id'],
     [{}, { title: 5 }, 'dashboard.title'],
@@ -279,6 +287,19 @@ test('malformed arguments are bad_request naming the field, before Display Manag
     assert.equal(r.detail, detail)
   }
   assert.equal(s.dm.calls.length, 0)
+})
+
+test('display ids: Display Manager\'s id form, never an Object.prototype member (IM #88)', () => {
+  const ok = (ids) => dp.validateArgs({ display_ids: ids, dashboard: { source_id: 's', doc: { midl: '1.0.0' } } })
+  for (const id of ['yey-d-28372f8a0290', 'yey-d-001', 'esp32.cabin', 'x_1', 'all']) {
+    assert.ok(ok([id]).request, id)
+  }
+  for (const id of ['__proto__', 'constructor', 'prototype', 'toString', 'valueOf', '__defineGetter__',
+    'a/b', '../x', 'a b', 'YEY-D-1', 'x'.repeat(65)]) {
+    assert.equal(ok([id]).error, 'display_ids', id)
+  }
+  assert.equal(ok('all').request.displayIds, 'all')
+  assert.deepEqual(ok([' yey-d-1 ', 'yey-d-1']).request.displayIds, ['yey-d-1'])
 })
 
 // ── rule 3: the 48 KiB doc cap, and a ~50 KiB request is carried ────────────
