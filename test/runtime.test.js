@@ -580,3 +580,31 @@ test('renaming needs a connected boat and a name', async () => {
   const c = harness()
   await assert.rejects(c.runtime.setDisplayName({ name: '  ' }), (e) => e.code === 'invalid_name')
 })
+
+test('locality invalidation survives the runtime buffer/uplink and still requires consent', async () => {
+  const path = 'navigation.locality.destination'
+  const mapping = { path, as: 'locality_destination', policy: 'on_change', min_interval_s: 600 }
+  const h = harness({ replies: [{ kind: 'plan', plan: planV(1, [mapping]), etag: 'loc1' }] })
+  h.runtime.setConsent([path])
+  await h.runtime.handshake()
+  h.runtime.onSample({ path, value: { text: 'old harbour' } })
+  h.advance(1)
+  h.runtime.onSample({ path, value: null })
+  h.runtime.onSample({ path, value: null }) // no repeated invalidation flood
+  await h.runtime.flush()
+  const data = h.published.find((p) => p.subject === 'yey.boat.data')
+  assert.equal(data.payload.values.length, 2)
+  assert.equal(data.payload.values[0].v.text, 'old harbour')
+  assert.equal(data.payload.values[1].v, null)
+  assert.equal(data.payload.values[1].p, path)
+
+  const denied = harness({ replies: [{ kind: 'plan', plan: planV(1, [mapping]), etag: 'loc2' }] })
+  denied.runtime.setConsent(['navigation.position'])
+  await denied.runtime.handshake()
+  denied.runtime.onSample({ path, value: null })
+  assert.equal(denied.runtime.snapshot().buffered, 0)
+  h.runtime.setConsent([])
+  h.runtime.onSample({ path, value: { text: 'must not send' } })
+  h.runtime.onSample({ path, value: null })
+  assert.equal(h.runtime.snapshot().buffered, 0)
+})
